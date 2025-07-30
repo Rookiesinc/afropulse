@@ -106,14 +106,34 @@ export default function HomePage() {
       if (showRefreshing) setRefreshing(true)
       else setLoading(true)
 
-      const [releasesRes, buzzingRes] = await Promise.all([fetch("/api/releases"), fetch("/api/buzzing")])
+      // Fetch with timeout protection
+      const fetchWithTimeout = (url: string, timeout = 15000) => {
+        return Promise.race([
+          fetch(url),
+          new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeout)),
+        ])
+      }
 
-      const releasesData: ApiResponse = releasesRes.ok
-        ? await releasesRes.json()
-        : { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
-      const buzzingData: ApiResponse = buzzingRes.ok
-        ? await buzzingRes.json()
-        : { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
+      const [releasesRes, buzzingRes] = await Promise.allSettled([
+        fetchWithTimeout("/api/releases"),
+        fetchWithTimeout("/api/buzzing"),
+      ])
+
+      // Handle releases response
+      let releasesData: ApiResponse = { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
+      if (releasesRes.status === "fulfilled" && releasesRes.value.ok) {
+        releasesData = await releasesRes.value.json()
+      } else {
+        console.error("Failed to fetch releases:", releasesRes.status === "rejected" ? releasesRes.reason : "API error")
+      }
+
+      // Handle buzzing response
+      let buzzingData: ApiResponse = { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
+      if (buzzingRes.status === "fulfilled" && buzzingRes.value.ok) {
+        buzzingData = await buzzingRes.value.json()
+      } else {
+        console.error("Failed to fetch buzzing:", buzzingRes.status === "rejected" ? buzzingRes.reason : "API error")
+      }
 
       setNewReleases(releasesData.songs || [])
       setBuzzingSongs(buzzingData.songs || [])
@@ -121,22 +141,22 @@ export default function HomePage() {
       setDataSource(releasesData.dataSource || "unknown")
       setDiscoveredArtists(releasesData.discoveredArtists || 0)
 
-      // Fetch trending news
+      // Generate trending news
       const trendingNewsData = generateTrendingNews()
       setTrendingNews(trendingNewsData)
 
       if (releasesData.error || buzzingData.error) {
         toast({
           title: "Data Warning",
-          description: releasesData.error || buzzingData.error,
+          description: releasesData.error || buzzingData.error || "Some data may be limited",
           variant: "destructive",
         })
       }
     } catch (error) {
       console.error("Error fetching data:", error)
       toast({
-        title: "Error",
-        description: "Failed to fetch latest music data",
+        title: "Connection Error",
+        description: "Using cached data. Check your internet connection.",
         variant: "destructive",
       })
     } finally {
@@ -236,14 +256,20 @@ export default function HomePage() {
 
     try {
       setSubscribing(true)
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
       const response = await fetch("/api/subscribe", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ email }),
+        signal: controller.signal,
       })
 
+      clearTimeout(timeoutId)
       const data = await response.json()
 
       if (response.ok) {
@@ -259,13 +285,21 @@ export default function HomePage() {
           variant: "destructive",
         })
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error subscribing:", error)
-      toast({
-        title: "Error",
-        description: "Failed to subscribe. Please try again.",
-        variant: "destructive",
-      })
+      if (error.name === "AbortError") {
+        toast({
+          title: "Timeout",
+          description: "Request timed out. Please try again.",
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to subscribe. Please try again.",
+          variant: "destructive",
+        })
+      }
     } finally {
       setSubscribing(false)
     }
@@ -278,9 +312,11 @@ export default function HomePage() {
   const getDataSourceBadge = () => {
     const badges = {
       spotify_live: { text: "Live", color: "bg-green-500" },
+      spotify_mixed: { text: "Mixed", color: "bg-blue-500" },
       spotify_cached: { text: "Cached", color: "bg-yellow-500" },
+      fallback: { text: "Fallback", color: "bg-orange-500" },
+      error_fallback: { text: "Offline", color: "bg-red-500" },
       error: { text: "Error", color: "bg-red-500" },
-      fallback: { text: "Fallback", color: "bg-gray-500" },
     }
 
     const badge = badges[dataSource as keyof typeof badges] || { text: "Unknown", color: "bg-gray-500" }
@@ -295,6 +331,17 @@ export default function HomePage() {
       return `${(num / 1000).toFixed(1)}K`
     }
     return num.toString()
+  }
+
+  const getDaysAgo = (dateString: string) => {
+    const releaseDate = new Date(dateString)
+    const now = new Date()
+    const diffTime = Math.abs(now.getTime() - releaseDate.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    if (diffDays === 1) return "1 day ago"
+    if (diffDays <= 7) return `${diffDays} days ago`
+    return "Over a week ago"
   }
 
   const SongCard = ({ song, index, showBuzzScore = false }: { song: Song; index: number; showBuzzScore?: boolean }) => (
@@ -336,8 +383,13 @@ export default function HomePage() {
           <p className="truncate">
             <span className="font-medium">Album:</span> {song.album}
           </p>
-          <p>
-            <span className="font-medium">Released:</span> {new Date(song.releaseDate).toLocaleDateString()}
+          <p className="flex items-center justify-between">
+            <span>
+              <span className="font-medium">Released:</span> {getDaysAgo(song.releaseDate)}
+            </span>
+            <Badge variant={getDaysAgo(song.releaseDate).includes("day") ? "default" : "secondary"} className="text-xs">
+              {getDaysAgo(song.releaseDate).includes("day") ? "🔥 Fresh" : "Recent"}
+            </Badge>
           </p>
           <div className="flex items-center justify-between">
             <Badge variant="outline" className="text-xs">
@@ -451,7 +503,7 @@ export default function HomePage() {
               <h1 className="text-3xl font-bold text-gray-900 mb-2">🎵 Afropulse</h1>
               <p className="text-gray-600">
                 Discover the pulse of African music • {newReleases.length + buzzingSongs.length} tracks •{" "}
-                {discoveredArtists} artists
+                {discoveredArtists} artists • Last 7 days
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -523,7 +575,7 @@ export default function HomePage() {
             <CardContent>
               <div className="text-2xl font-bold">{filteredReleases.length}</div>
               <p className="text-xs text-muted-foreground">
-                {filteredReleases.length !== newReleases.length ? `of ${newReleases.length} total` : "tracks"}
+                {filteredReleases.length !== newReleases.length ? `of ${newReleases.length} total` : "last 7 days"}
               </p>
             </CardContent>
           </Card>

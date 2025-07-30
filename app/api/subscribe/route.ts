@@ -1,103 +1,129 @@
-import { type NextRequest, NextResponse } from "next/server"
-import fs from "fs"
+import { NextResponse } from "next/server"
+import { promises as fs } from "fs"
 import path from "path"
 
 interface Subscriber {
   email: string
-  subscribedAt: string
-  active: boolean
+  verified: boolean
+  subscribed_at: string
+  unsubscribed_at?: string
+  status: "active" | "unsubscribed" | "pending"
 }
 
 const SUBSCRIBERS_FILE = path.join(process.cwd(), "data", "subscribers.json")
 
-// Ensure data directory exists
-function ensureDataDirectory() {
-  const dataDir = path.dirname(SUBSCRIBERS_FILE)
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true })
-  }
-}
-
-// Read subscribers from file
-function readSubscribers(): Subscriber[] {
-  ensureDataDirectory()
+async function ensureDataDirectory() {
+  const dataDir = path.join(process.cwd(), "data")
   try {
-    if (fs.existsSync(SUBSCRIBERS_FILE)) {
-      const data = fs.readFileSync(SUBSCRIBERS_FILE, "utf8")
-      return JSON.parse(data)
-    }
-  } catch (error) {
-    console.error("Error reading subscribers:", error)
+    await fs.access(dataDir)
+  } catch {
+    await fs.mkdir(dataDir, { recursive: true })
   }
-  return []
 }
 
-// Write subscribers to file
-function writeSubscribers(subscribers: Subscriber[]) {
-  ensureDataDirectory()
+async function readSubscribers(): Promise<Subscriber[]> {
   try {
-    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify(subscribers, null, 2))
+    await ensureDataDirectory()
+    const data = await fs.readFile(SUBSCRIBERS_FILE, "utf-8")
+    return JSON.parse(data)
   } catch (error) {
-    console.error("Error writing subscribers:", error)
-    throw error
+    // File doesn't exist or is empty, return empty array
+    return []
   }
 }
 
-export async function POST(request: NextRequest) {
+async function writeSubscribers(subscribers: Subscriber[]): Promise<void> {
+  await ensureDataDirectory()
+  await fs.writeFile(SUBSCRIBERS_FILE, JSON.stringify(subscribers, null, 2))
+}
+
+function isValidEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return emailRegex.test(email)
+}
+
+export async function POST(request: Request) {
   try {
     const { email } = await request.json()
 
-    if (!email || !email.includes("@")) {
-      return NextResponse.json({ error: "Valid email is required" }, { status: 400 })
+    if (!email) {
+      return NextResponse.json({ error: "Email is required" }, { status: 400 })
     }
 
-    const subscribers = readSubscribers()
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 })
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+    const subscribers = await readSubscribers()
 
     // Check if email already exists
-    const existingSubscriber = subscribers.find((sub) => sub.email === email)
+    const existingSubscriber = subscribers.find((sub) => sub.email === normalizedEmail)
+
     if (existingSubscriber) {
-      if (existingSubscriber.active) {
-        return NextResponse.json({ error: "Email already subscribed" }, { status: 409 })
-      } else {
-        // Reactivate subscription
-        existingSubscriber.active = true
-        existingSubscriber.subscribedAt = new Date().toISOString()
+      if (existingSubscriber.status === "active") {
+        return NextResponse.json({ error: "Email is already subscribed to our newsletter" }, { status: 400 })
+      } else if (existingSubscriber.status === "unsubscribed") {
+        // Reactivate the subscription
+        existingSubscriber.status = "active"
+        existingSubscriber.verified = true
+        existingSubscriber.subscribed_at = new Date().toISOString()
+        delete existingSubscriber.unsubscribed_at
+
+        await writeSubscribers(subscribers)
+
+        return NextResponse.json({
+          success: true,
+          message: "Welcome back! Your subscription has been reactivated.",
+        })
       }
-    } else {
-      // Add new subscriber
-      subscribers.push({
-        email,
-        subscribedAt: new Date().toISOString(),
-        active: true,
-      })
     }
 
-    writeSubscribers(subscribers)
+    // Add new subscriber
+    const newSubscriber: Subscriber = {
+      email: normalizedEmail,
+      verified: true, // Auto-verify for simplicity
+      subscribed_at: new Date().toISOString(),
+      status: "active",
+    }
+
+    subscribers.push(newSubscriber)
+    await writeSubscribers(subscribers)
+
+    console.log(`✅ New subscriber added: ${normalizedEmail}`)
 
     return NextResponse.json({
-      message: "Successfully subscribed to weekly digest",
-      email,
+      success: true,
+      message: "Successfully subscribed! You'll receive our weekly digest every Friday.",
     })
-  } catch (error) {
-    console.error("Error subscribing email:", error)
-    return NextResponse.json({ error: "Failed to subscribe" }, { status: 500 })
+  } catch (error: any) {
+    console.error("❌ Error in subscribe API:", error)
+    return NextResponse.json(
+      {
+        error: "Failed to subscribe. Please try again later.",
+        details: error.message,
+      },
+      { status: 500 },
+    )
   }
 }
 
 export async function GET() {
   try {
-    const subscribers = readSubscribers()
-    const activeSubscribers = subscribers.filter((sub) => sub.active)
+    const subscribers = await readSubscribers()
+    const activeSubscribers = subscribers.filter((sub) => sub.status === "active")
 
     return NextResponse.json({
-      total: activeSubscribers.length,
+      total: subscribers.length,
+      active: activeSubscribers.length,
       subscribers: activeSubscribers.map((sub) => ({
         email: sub.email,
-        subscribedAt: sub.subscribedAt,
+        subscribed_at: sub.subscribed_at,
+        verified: sub.verified,
       })),
     })
-  } catch (error) {
-    console.error("Error fetching subscribers:", error)
+  } catch (error: any) {
+    console.error("❌ Error fetching subscribers:", error)
     return NextResponse.json({ error: "Failed to fetch subscribers" }, { status: 500 })
   }
 }
