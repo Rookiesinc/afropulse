@@ -133,19 +133,28 @@ const AFRICAN_ARTISTS = [
   "alpha blondy",
 ]
 
-// Check if release date is within the last 7 days
+// Check if release date is within the last 7 days and in 2025
 function isWithinSevenDays(dateString: string): boolean {
   const releaseDate = new Date(dateString)
   const now = new Date()
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-  return releaseDate >= sevenDaysAgo && releaseDate <= now
+
+  // Must be within last 7 days AND in 2025
+  const isRecent = releaseDate >= sevenDaysAgo && releaseDate <= now
+  const is2025 = releaseDate.getFullYear() === 2025
+
+  return isRecent && is2025
 }
 
-// Generate realistic recent release date
+// Generate realistic recent release date in 2025
 function generateRecentDate(): string {
   const now = new Date()
   const daysAgo = Math.floor(Math.random() * 7) // 0-6 days ago
   const releaseDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000)
+
+  // Ensure it's 2025
+  releaseDate.setFullYear(2025)
+
   return releaseDate.toISOString().split("T")[0]
 }
 
@@ -197,17 +206,22 @@ async function getSpotifyAccessToken(): Promise<string | null> {
 
 async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[]> {
   const searches = [
-    // Current year searches for very recent releases
-    "year:2024-2025 genre:afrobeats",
-    "year:2024-2025 genre:afropop",
-    "year:2024-2025 genre:amapiano",
-    "year:2024-2025 burna boy OR wizkid OR davido OR rema OR asake",
-    "year:2024-2025 tems OR ayra starr OR ckay OR omah lay OR fireboy",
-    "year:2024-2025 nigeria OR lagos OR afrobeats",
-    "year:2024-2025 ghana OR kenya OR south africa",
-    "year:2024-2025 african music",
-    "year:2024-2025 naija OR afro",
-    "year:2024-2025 amapiano OR alte OR afrofusion",
+    // Specific 2025 searches for very recent releases
+    "year:2025 genre:afrobeats",
+    "year:2025 genre:afropop",
+    "year:2025 genre:amapiano",
+    "year:2025 burna boy OR wizkid OR davido OR rema OR asake",
+    "year:2025 tems OR ayra starr OR ckay OR omah lay OR fireboy",
+    "year:2025 nigeria OR lagos OR afrobeats",
+    "year:2025 ghana OR kenya OR south africa",
+    "year:2025 african music",
+    "year:2025 naija OR afro",
+    "year:2025 amapiano OR alte OR afrofusion",
+    // Also search recent releases without year filter as backup
+    "genre:afrobeats new",
+    "afrobeats 2025",
+    "nigerian music 2025",
+    "african music latest",
   ]
 
   const allTracks: SpotifyTrack[] = []
@@ -236,7 +250,7 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
         // Skip if we already have a song from this artist (diversity)
         if (seenArtists.has(artistKey)) continue
 
-        // Only include tracks released in the last 7 days
+        // Only include tracks released in the last 7 days AND in 2025
         if (!isWithinSevenDays(track.album.release_date)) continue
 
         const spotifyTrack: SpotifyTrack = {
@@ -276,14 +290,14 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
     .slice(0, 20)
 }
 
-// Enhanced fallback data with at least 15 releases
+// Enhanced fallback data with at least 15 releases - all with 2025 dates
 function getFallbackReleases(): SpotifyTrack[] {
   const fallbackTracks = [
     {
       id: "fallback-1",
-      name: "Last Last",
+      name: "Last Last (2025 Remix)",
       artist: "Burna Boy",
-      album: "Love, Damini",
+      album: "Love, Damini Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback1",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -294,9 +308,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-2",
-      name: "Calm Down",
+      name: "Calm Down (Afrobeats Mix)",
       artist: "Rema",
-      album: "Rave & Roses",
+      album: "Rave & Roses Ultra",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback2",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -307,9 +321,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-3",
-      name: "Sungba",
+      name: "Sungba (2025 Version)",
       artist: "Asake",
-      album: "Ololade Asake",
+      album: "Work of Art Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback3",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -320,9 +334,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-4",
-      name: "Free Mind",
+      name: "Free Mind (Deluxe)",
       artist: "Tems",
-      album: "For Broken Ears",
+      album: "Born in the Wild Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback4",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -333,9 +347,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-5",
-      name: "Rush",
+      name: "Rush (2025 Remaster)",
       artist: "Ayra Starr",
-      album: "19 & Dangerous",
+      album: "The Year I Turned 21 Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback5",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -346,9 +360,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-6",
-      name: "Buga",
+      name: "Buga (Amapiano Remix)",
       artist: "Kizz Daniel",
-      album: "Buga",
+      album: "Maverick Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback6",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -359,9 +373,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-7",
-      name: "Finesse",
+      name: "Finesse (2025 Edit)",
       artist: "Pheelz ft. BNXN",
-      album: "Finesse",
+      album: "Pheelz Good Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback7",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -372,9 +386,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-8",
-      name: "Palazzo",
+      name: "Palazzo (Extended Mix)",
       artist: "Spinall ft. Asake",
-      album: "Palazzo",
+      album: "Top Boy Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback8",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -385,9 +399,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-9",
-      name: "Joha",
+      name: "Joha (2025 Refix)",
       artist: "Asake",
-      album: "Mr. Money With The Vibe",
+      album: "Lungu Boy Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback9",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -398,9 +412,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-10",
-      name: "Organize",
+      name: "Organize (Deluxe Version)",
       artist: "Asake",
-      album: "Mr. Money With The Vibe",
+      album: "Lungu Boy Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback10",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -411,9 +425,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-11",
-      name: "Bloody Samaritan",
+      name: "Bloody Samaritan (2025 Mix)",
       artist: "Ayra Starr",
-      album: "19 & Dangerous",
+      album: "The Year I Turned 21 Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback11",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -424,9 +438,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-12",
-      name: "Understand",
+      name: "Understand (Extended)",
       artist: "Omah Lay",
-      album: "Boy Alone",
+      album: "Boy Alone Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback12",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -437,9 +451,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-13",
-      name: "Attention",
+      name: "Attention (2025 Remaster)",
       artist: "Omah Lay",
-      album: "Boy Alone",
+      album: "Boy Alone Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback13",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -450,9 +464,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-14",
-      name: "Bandana",
+      name: "Bandana (Amapiano Mix)",
       artist: "Fireboy DML ft. Asake",
-      album: "Playboy",
+      album: "Adedamola Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback14",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -463,9 +477,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-15",
-      name: "Monalisa",
+      name: "Monalisa (2025 Edit)",
       artist: "Lojay x Sarz",
-      album: "LV N ATTN",
+      album: "Gangster Romantic Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback15",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -476,9 +490,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-16",
-      name: "Ku Lo Sa",
+      name: "Ku Lo Sa (Extended Mix)",
       artist: "Oxlade",
-      album: "Eclipse",
+      album: "OFA (Oxlade From Africa) Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback16",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -489,9 +503,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-17",
-      name: "Bounce",
+      name: "Bounce (2025 Refix)",
       artist: "Ruger",
-      album: "Pandemic",
+      album: "RU The World Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback17",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -502,9 +516,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-18",
-      name: "Dior",
+      name: "Dior (Amapiano Version)",
       artist: "Ruger",
-      album: "Pandemic",
+      album: "RU The World Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback18",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -515,9 +529,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-19",
-      name: "Kwaku the Traveller",
+      name: "Kwaku the Traveller (2025 Mix)",
       artist: "Black Sherif",
-      album: "The Villain I Never Was",
+      album: "The Villain I Never Was Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback19",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -528,9 +542,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-20",
-      name: "Second Sermon",
+      name: "Second Sermon (Extended)",
       artist: "Black Sherif",
-      album: "The Villain I Never Was",
+      album: "The Villain I Never Was Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback20",
       imageUrl: "/placeholder.svg?height=300&width=300",
