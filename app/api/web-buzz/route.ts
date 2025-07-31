@@ -8,199 +8,50 @@ interface WebBuzzData {
   sources: string[]
 }
 
-// Simulate web scraping for social media buzz
-async function scrapeTwitterBuzz(): Promise<WebBuzzData[]> {
-  // In a real implementation, you would use Twitter API v2 or web scraping
-  // For now, we'll simulate the data structure
-
-  const mockBuzzData: WebBuzzData[] = [
-    {
-      artist: "Burna Boy",
-      song: "Last Last",
-      mentions: 15420,
-      sentiment: 0.85,
-      sources: ["twitter", "instagram", "tiktok"],
-    },
-    {
-      artist: "Tyla",
-      song: "Water",
-      mentions: 12890,
-      sentiment: 0.92,
-      sources: ["twitter", "instagram", "youtube"],
-    },
-    {
-      artist: "Rema",
-      song: "Calm Down",
-      mentions: 18750,
-      sentiment: 0.88,
-      sources: ["twitter", "instagram", "tiktok", "youtube"],
-    },
-    {
-      artist: "Asake",
-      song: "Joha",
-      mentions: 9340,
-      sentiment: 0.79,
-      sources: ["twitter", "instagram"],
-    },
-    {
-      artist: "Davido",
-      song: "Unavailable",
-      mentions: 11200,
-      sentiment: 0.83,
-      sources: ["twitter", "instagram", "youtube"],
-    },
-  ]
-
-  return mockBuzzData
+// Helper function to get a random integer between min and max (inclusive)
+function getRandomInt(min: number, max: number) {
+  min = Math.ceil(min)
+  max = Math.floor(max)
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-// Simulate Instagram hashtag tracking
-async function scrapeInstagramBuzz(): Promise<WebBuzzData[]> {
-  // In a real implementation, you would use Instagram Graph API or scraping
-  const mockInstagramData: WebBuzzData[] = [
-    {
-      artist: "Tems",
-      song: "Free Mind",
-      mentions: 8750,
-      sentiment: 0.91,
-      sources: ["instagram"],
-    },
-    {
-      artist: "Ayra Starr",
-      song: "Rush",
-      mentions: 7200,
-      sentiment: 0.87,
-      sources: ["instagram"],
-    },
-    {
-      artist: "Oxlade",
-      song: "Ku Lo Sa",
-      mentions: 5600,
-      sentiment: 0.82,
-      sources: ["instagram"],
-    },
-  ]
+// Simulated data for web buzz from various sources
+const generateWebBuzzData = () => {
+  const data = []
+  const artists = ["Wizkid", "Davido", "Burna Boy", "Rema", "Tems", "Asake", "Ayra Starr", "Omah Lay"]
+  const songs = ["Essence", "Unavailable", "Last Last", "Calm Down", "Me & U", "Sungba", "Rush", "Soso"]
+  const sources = ["YouTube", "Audiomack", "Apple Music", "Blogs", "News Sites", "Forums"]
 
-  return mockInstagramData
-}
+  for (let i = 0; i < 20; i++) {
+    const artist = artists[getRandomInt(0, artists.length - 1)]
+    const song = songs[getRandomInt(0, songs.length - 1)]
+    const source = sources[getRandomInt(0, sources.length - 1)]
+    const totalMentions = getRandomInt(100, 5000)
+    const avgSentiment = Number.parseFloat((Math.random() * 2 - 1).toFixed(2)) // Between -1 and 1
+    const buzzScore = getRandomInt(50, 100)
 
-// Simulate YouTube trending data
-async function scrapeYouTubeBuzz(): Promise<WebBuzzData[]> {
-  // In a real implementation, you would use YouTube Data API
-  const mockYouTubeData: WebBuzzData[] = [
-    {
-      artist: "Wizkid",
-      song: "More Love Less Ego",
-      mentions: 25000,
-      sentiment: 0.89,
-      sources: ["youtube"],
-    },
-    {
-      artist: "Fireboy DML",
-      song: "Bandana",
-      mentions: 18900,
-      sentiment: 0.84,
-      sources: ["youtube"],
-    },
-  ]
-
-  return mockYouTubeData
-}
-
-// Simulate Audiomack trending data
-async function scrapeAudiomackBuzz(): Promise<WebBuzzData[]> {
-  const mockAudiomackData: WebBuzzData[] = [
-    {
-      artist: "Joeboy",
-      song: "Sip (Alcohol)",
-      mentions: 7500,
-      sentiment: 0.8,
-      sources: ["audiomack"],
-    },
-    {
-      artist: "Omah Lay",
-      song: "Godly",
-      mentions: 6200,
-      sentiment: 0.85,
-      sources: ["audiomack"],
-    },
-  ]
-  return mockAudiomackData
-}
-
-// Simulate Apple Music trending data
-async function scrapeAppleMusicBuzz(): Promise<WebBuzzData[]> {
-  const mockAppleMusicData: WebBuzzData[] = [
-    {
-      artist: "Davido",
-      song: "Feel",
-      mentions: 9800,
-      sentiment: 0.87,
-      sources: ["apple-music"],
-    },
-    {
-      artist: "Burna Boy",
-      song: "City Boys",
-      mentions: 11500,
-      sentiment: 0.9,
-      sources: ["apple-music"],
-    },
-  ]
-  return mockAppleMusicData
+    data.push({
+      id: `web-buzz-${i}-${Date.now()}`,
+      artist,
+      song,
+      source,
+      totalMentions,
+      avgSentiment,
+      buzzScore,
+      timestamp: new Date().toISOString(),
+    })
+  }
+  return data
 }
 
 export async function GET() {
   try {
-    // Gather buzz data from multiple web sources
-    const [twitterBuzz, instagramBuzz, youtubeBuzz, audiomackBuzz, appleMusicBuzz] = await Promise.all([
-      scrapeTwitterBuzz(),
-      scrapeInstagramBuzz(),
-      scrapeYouTubeBuzz(),
-      scrapeAudiomackBuzz(),
-      scrapeAppleMusicBuzz(),
-    ])
-
-    // Combine all buzz data
-    const allBuzzData = [...twitterBuzz, ...instagramBuzz, ...youtubeBuzz, ...audiomackBuzz, ...appleMusicBuzz]
-
-    // Aggregate data by artist/song combination
-    const aggregatedBuzz = allBuzzData.reduce((acc, item) => {
-      const key = `${item.artist}-${item.song}`
-      if (!acc[key]) {
-        acc[key] = {
-          artist: item.artist,
-          song: item.song,
-          totalMentions: 0,
-          avgSentiment: 0,
-          sources: new Set<string>(),
-          sentimentSum: 0,
-          count: 0,
-        }
-      }
-
-      acc[key].totalMentions += item.mentions
-      acc[key].sentimentSum += item.sentiment
-      acc[key].count += 1
-      acc[key].avgSentiment = acc[key].sentimentSum / acc[key].count
-      item.sources.forEach((source) => acc[key].sources.add(source))
-
-      return acc
-    }, {} as any)
-
-    // Convert to array and sort by total mentions
-    const buzzRanking = Object.values(aggregatedBuzz)
-      .map((item: any) => ({
-        ...item,
-        sources: Array.from(item.sources),
-        buzzScore: Math.round((item.totalMentions / 1000) * item.avgSentiment),
-      }))
-      .sort((a: any, b: any) => b.totalMentions - a.totalMentions)
-
+    const buzzData = generateWebBuzzData()
     return NextResponse.json({
-      buzzData: buzzRanking,
+      buzzData,
       lastUpdated: new Date().toISOString(),
-      sources: ["twitter", "instagram", "youtube", "tiktok", "audiomack", "apple-music"],
-      total: buzzRanking.length,
+      total: buzzData.length,
+      sources: ["YouTube", "Audiomack", "Apple Music", "Blogs", "News Sites", "Forums"],
     })
   } catch (error) {
     console.error("Error fetching web buzz data:", error)

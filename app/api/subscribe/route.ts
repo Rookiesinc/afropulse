@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server"
 import nodemailer from "nodemailer"
-import { promises as fs } from "fs"
-import path from "path"
 
-const SUBSCRIBERS_FILE = path.join(process.cwd(), "data", "subscribers.json")
-
+// In-memory storage for subscribers (for demonstration purposes)
 interface Subscriber {
   email: string
   subscribedAt: string
@@ -12,39 +9,8 @@ interface Subscriber {
   verificationToken?: string
 }
 
-// In-memory cache for subscribers to reduce file reads
-let subscribersCache: Subscriber[] | null = null
-
-async function readSubscribers(): Promise<Subscriber[]> {
-  if (subscribersCache) {
-    return subscribersCache
-  }
-  try {
-    const data = await fs.readFile(SUBSCRIBERS_FILE, "utf8")
-    subscribersCache = JSON.parse(data)
-    return subscribersCache
-  } catch (error: any) {
-    if (error.code === "ENOENT") {
-      // File does not exist, return empty array and create the directory/file
-      await fs.mkdir(path.dirname(SUBSCRIBERS_FILE), { recursive: true })
-      await fs.writeFile(SUBSCRIBERS_FILE, JSON.stringify([]), "utf8")
-      subscribersCache = []
-      return []
-    }
-    console.error("Error reading subscribers file:", error)
-    throw new Error("Failed to read subscribers data")
-  }
-}
-
-async function writeSubscribers(subscribers: Subscriber[]): Promise<void> {
-  subscribersCache = subscribers // Update cache
-  try {
-    await fs.writeFile(SUBSCRIBERS_FILE, JSON.stringify(subscribers, null, 2), "utf8")
-  } catch (error) {
-    console.error("Error writing subscribers file:", error)
-    throw new Error("Failed to write subscribers data")
-  }
-}
+// Using a Map for in-memory storage for better performance and direct access
+const subscribers = new Map<string, Subscriber>()
 
 // Nodemailer transporter setup
 const transporter = nodemailer.createTransport({
@@ -64,115 +30,133 @@ export async function POST(req: Request) {
   try {
     const { email } = await req.json()
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!email || typeof email !== "string" || !email.includes("@")) {
       return NextResponse.json({ error: "Invalid email address" }, { status: 400 })
     }
 
-    const subscribers = await readSubscribers()
-    const existingSubscriber = subscribers.find((s) => s.email === email)
+    const normalizedEmail = email.toLowerCase().trim()
 
-    if (existingSubscriber) {
+    if (subscribers.has(normalizedEmail)) {
+      const existingSubscriber = subscribers.get(normalizedEmail)!
       if (existingSubscriber.verified) {
-        return NextResponse.json({ message: "Email already subscribed and verified" }, { status: 200 })
+        return NextResponse.json({ error: "Email already subscribed and verified" }, { status: 409 })
       } else {
         // Resend verification email if not verified
         const verificationToken = existingSubscriber.verificationToken || generateVerificationToken()
         existingSubscriber.verificationToken = verificationToken
-        await writeSubscribers(subscribers) // Save updated token if new
+        subscribers.set(normalizedEmail, existingSubscriber) // Update token if regenerated
 
-        const verificationLink = `${process.env.VERCEL_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`
+        const verificationLink = `${process.env.VERCEL_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(normalizedEmail)}`
 
         const mailOptions = {
           from: `"Afropulse" <${process.env.GMAIL_USER}>`, // Use GMAIL_USER directly
-          to: email,
+          to: normalizedEmail,
           subject: "Verify your Afropulse Subscription",
           html: `
             <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-              <h2 style="color: #e53e3e;">Welcome to Afropulse!</h2>
-              <p>Thank you for subscribing to our weekly digest of the hottest African music releases and trends.</p>
-              <p>Please verify your email address by clicking the link below:</p>
-              <p style="margin: 20px 0;">
-                <a href="${verificationLink}" style="display: inline-block; padding: 10px 20px; background-color: #e53e3e; color: #ffffff; text-decoration: none; border-radius: 5px;">Verify Email Address</a>
+              <h2 style="color: #ff5722;">Confirm Your Afropulse Subscription</h2>
+              <p>Thank you for subscribing to our weekly Afrobeats digest!</p>
+              <p>Please click the button below to verify your email address and activate your subscription:</p>
+              <p style="text-align: center;">
+                <a href="${verificationLink}" style="display: inline-block; padding: 10px 20px; background-color: #ff5722; color: #ffffff; text-decoration: none; border-radius: 5px;">Verify Email Address</a>
               </p>
+              <p>If the button doesn't work, you can also copy and paste the following link into your browser:</p>
+              <p><a href="${verificationLink}">${verificationLink}</a></p>
               <p>This link will expire in 24 hours.</p>
               <p>If you did not subscribe to Afropulse, please ignore this email.</p>
-              <p>Best regards,<br/>The Afropulse Team</p>
+              <p>Best regards,<br>The Afropulse Team</p>
             </div>
           `,
         }
 
-        await new Promise((resolve, reject) => {
-          transporter.sendMail(mailOptions, (err) => {
-            if (err) {
-              console.error("Error sending verification email:", err)
-              return reject(new Error("Failed to send verification email"))
-            }
-            resolve(true)
-          })
-        })
+        try {
+          const sendMailPromise = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error("Email sending timed out"))
+            }, 10000) // 10 seconds timeout
 
-        return NextResponse.json({ message: "Verification email re-sent. Please check your inbox." }, { status: 200 })
+            transporter.sendMail(mailOptions, (error, info) => {
+              clearTimeout(timeout)
+              if (error) {
+                console.error("Error sending verification email:", error)
+                reject(error)
+              } else {
+                console.log("Verification email sent:", info.response)
+                resolve()
+              }
+            })
+          })
+          await sendMailPromise
+          return NextResponse.json({ message: "Verification email resent. Please check your inbox." }, { status: 200 })
+        } catch (emailError) {
+          console.error("Failed to resend verification email:", emailError)
+          return NextResponse.json(
+            { error: "Failed to resend verification email. Please try again later." },
+            { status: 500 },
+          )
+        }
       }
     }
 
-    // New subscriber
     const verificationToken = generateVerificationToken()
-    const newSubscriber: Subscriber = {
-      email,
+    subscribers.set(normalizedEmail, {
+      email: normalizedEmail,
       subscribedAt: new Date().toISOString(),
       verified: false,
       verificationToken,
-    }
-    subscribers.push(newSubscriber)
-    await writeSubscribers(subscribers)
+    })
 
-    const verificationLink = `${process.env.VERCEL_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`
+    const verificationLink = `${process.env.VERCEL_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(normalizedEmail)}`
 
     const mailOptions = {
       from: `"Afropulse" <${process.env.GMAIL_USER}>`, // Use GMAIL_USER directly
-      to: email,
+      to: normalizedEmail,
       subject: "Verify your Afropulse Subscription",
       html: `
         <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <h2 style="color: #e53e3e;">Welcome to Afropulse!</h2>
-          <p>Thank you for subscribing to our weekly digest of the hottest African music releases and trends.</p>
-          <p>Please verify your email address by clicking the link below:</p>
-          <p style="margin: 20px 0;">
-            <a href="${verificationLink}" style="display: inline-block; padding: 10px 20px; background-color: #e53e3e; color: #ffffff; text-decoration: none; border-radius: 5px;">Verify Email Address</a>
+          <h2 style="color: #ff5722;">Confirm Your Afropulse Subscription</h2>
+          <p>Thank you for subscribing to our weekly Afrobeats digest!</p>
+          <p>Please click the button below to verify your email address and activate your subscription:</p>
+          <p style="text-align: center;">
+            <a href="${verificationLink}" style="display: inline-block; padding: 10px 20px; background-color: #ff5722; color: #ffffff; text-decoration: none; border-radius: 5px;">Verify Email Address</a>
           </p>
+          <p>If the button doesn't work, you can also copy and paste the following link into your browser:</p>
+          <p><a href="${verificationLink}">${verificationLink}</a></p>
           <p>This link will expire in 24 hours.</p>
           <p>If you did not subscribe to Afropulse, please ignore this email.</p>
-          <p>Best regards,<br/>The Afropulse Team</p>
+          <p>Best regards,<br>The Afropulse Team</p>
         </div>
       `,
     }
 
-    await new Promise((resolve, reject) => {
-      transporter.sendMail(mailOptions, (err) => {
-        if (err) {
-          console.error("Error sending verification email:", err)
-          return reject(new Error("Failed to send verification email"))
+    const sendMailPromise = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Email sending timed out"))
+      }, 10000) // 10 seconds timeout
+
+      transporter.sendMail(mailOptions, (error, info) => {
+        clearTimeout(timeout)
+        if (error) {
+          console.error("Error sending verification email:", error)
+          reject(error)
+        } else {
+          console.log("Verification email sent:", info.response)
+          resolve()
         }
-        resolve(true)
       })
     })
+
+    await sendMailPromise
 
     return NextResponse.json(
       { message: "Subscription successful! Please check your email to verify." },
       { status: 200 },
     )
   } catch (error) {
-    console.error("Subscription API error:", error)
+    console.error("Subscription error:", error)
     return NextResponse.json({ error: "Failed to subscribe. Please try again later." }, { status: 500 })
   }
 }
 
-export async function GET() {
-  try {
-    const subscribers = await readSubscribers()
-    return NextResponse.json({ total: subscribers.length, verified: subscribers.filter((s) => s.verified).length })
-  } catch (error) {
-    console.error("Error fetching subscriber count:", error)
-    return NextResponse.json({ total: 0, error: "Failed to fetch subscriber count" }, { status: 500 })
-  }
-}
+// Export subscribers map for other routes (e.g., verify-email, send-digest)
+export { subscribers }
