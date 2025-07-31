@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server"
 import nodemailer from "nodemailer"
 
-const GMAIL_USER = process.env.GMAIL_USER
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
-
-interface SpotifyTrack {
+interface DigestTrack {
   id: string
   name: string
   artist: string
@@ -15,247 +12,214 @@ interface SpotifyTrack {
   popularity: number
   genre: string
   streams: number
-  previewUrl?: string
+  previewUrl: string | null
 }
 
+// In-memory subscribers (in production, this would come from a database)
 interface Subscriber {
   email: string
   subscribedAt: string
-  isActive: boolean
-  verifiedAt?: string
+  verified: boolean
+  verificationToken: string
 }
 
-// Update the getActiveSubscribers function to work with in-memory storage
-async function getActiveSubscribers(): Promise<string[]> {
-  try {
-    // In production, this would fetch from a database
-    // For now, return the same test emails that are in the subscribe API
-    const activeEmails = ["tobionisemo2020@gmail.com", "tosinogen2012@gmail.com"]
+const subscribers: Subscriber[] = [
+  { email: "test1@example.com", subscribedAt: new Date().toISOString(), verified: true, verificationToken: "" },
+  { email: "test2@example.com", subscribedAt: new Date().toISOString(), verified: true, verificationToken: "" },
+  // Add more test subscribers as needed
+]
 
-    console.log(`Found ${activeEmails.length} active subscribers`)
-    return activeEmails
-  } catch (error) {
-    console.error("Error reading subscribers:", error)
-    return []
-  }
+const GMAIL_USER = process.env.GMAIL_USER
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
+
+// Create a Nodemailer transporter using Gmail SMTP
+const transporter =
+  GMAIL_USER && GMAIL_APP_PASSWORD
+    ? nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: GMAIL_USER,
+          pass: GMAIL_APP_PASSWORD,
+        },
+      })
+    : null
+
+// Function to fetch new releases (re-using logic from releases/route.ts)
+// This is a simplified version for the digest. In a real app, you might
+// want to call the internal /api/releases endpoint or share the logic.
+async function getNewReleasesForDigest(): Promise<any[]> {
+  // This is a placeholder. In a real app, you'd fetch actual data.
+  // For now, return some static data or call your /api/releases endpoint.
+  const fallbackTracks = [
+    {
+      id: "digest-1",
+      name: "Afrobeat Anthem",
+      artist: "V0 Artist",
+      album: "Digest Hits",
+      releaseDate: new Date().toISOString().split("T")[0],
+      spotifyUrl: "https://open.spotify.com/track/placeholder1",
+      imageUrl: "/placeholder.svg?height=100&width=100&text=Afrobeat+Anthem",
+      popularity: 80,
+      genre: "Afrobeats",
+      streams: 1000000,
+      previewUrl: null,
+    },
+    {
+      id: "digest-2",
+      name: "Rhythm of Lagos",
+      artist: "V0 Crew",
+      album: "City Vibes",
+      releaseDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 2 days ago
+      spotifyUrl: "https://open.spotify.com/track/placeholder2",
+      imageUrl: "/placeholder.svg?height=100&width=100&text=Rhythm+of+Lagos",
+      popularity: 75,
+      genre: "Afropop",
+      streams: 800000,
+      previewUrl: null,
+    },
+    {
+      id: "digest-3",
+      name: "Amapiano Groove",
+      artist: "V0 Collective",
+      album: "Dance Floor",
+      releaseDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 5 days ago
+      spotifyUrl: "https://open.spotify.com/track/placeholder3",
+      imageUrl: "/placeholder.svg?height=100&width=100&text=Amapiano+Groove",
+      popularity: 70,
+      genre: "Amapiano",
+      streams: 600000,
+      previewUrl: null,
+    },
+  ]
+  return fallbackTracks
 }
 
-async function fetchMusicData(endpoint: string): Promise<SpotifyTrack[]> {
-  try {
-    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"
-
-    const response = await fetch(`${baseUrl}/api/${endpoint}`, {
-      headers: {
-        "User-Agent": "Afropulse-Digest/1.0",
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${endpoint}: ${response.status}`)
-    }
-
-    const data = await response.json()
-    return data.songs || []
-  } catch (error) {
-    console.error(`Error fetching ${endpoint}:`, error)
-    return []
-  }
-}
-
-function formatDate(dateString: string): string {
-  const date = new Date(dateString)
-  return date.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  })
-}
-
-function getDaysAgo(dateString: string): string {
-  const releaseDate = new Date(dateString)
-  const now = new Date()
-  const diffTime = Math.abs(now.getTime() - releaseDate.getTime())
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) return "Today"
-  if (diffDays === 1) return "1 day ago"
-  return `${diffDays} days ago`
-}
-
-function generateEmailHTML(newReleases: SpotifyTrack[], buzzingSongs: SpotifyTrack[]): string {
-  const currentDate = formatDate(new Date().toISOString())
-
-  const newReleasesHTML = newReleases
-    .slice(0, 15)
+// Function to generate the HTML email content
+function generateEmailHtml(releases: any[]): string {
+  const releaseItems = releases
     .map(
-      (song) => `
-      <tr>
-        <td style="padding: 15px; border-bottom: 1px solid #eee;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td width="60" style="padding-right: 15px;">
-                <img src="${song.imageUrl || "https://via.placeholder.com/60x60/ff6b35/ffffff?text=♪"}" 
-                     alt="${song.album}" 
-                     style="width: 60px; height: 60px; border-radius: 8px; object-fit: cover;">
-              </td>
-              <td>
-                <h3 style="margin: 0 0 5px 0; font-size: 16px; font-weight: 600; color: #1a1a1a;">
-                  ${song.name}
-                </h3>
-                <p style="margin: 0 0 3px 0; font-size: 14px; color: #666;">
-                  by ${song.artist}
-                </p>
-                <p style="margin: 0; font-size: 12px; color: #999;">
-                  ${song.album} • ${getDaysAgo(song.releaseDate)}
-                </p>
-              </td>
-              <td width="80" style="text-align: right;">
-                <a href="${song.spotifyUrl}" 
-                   style="display: inline-block; background: #1DB954; color: white; padding: 8px 12px; 
-                          text-decoration: none; border-radius: 20px; font-size: 12px; font-weight: 500;">
-                  Play
-                </a>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    `,
-    )
-    .join("")
-
-  const buzzingSongsHTML = buzzingSongs
-    .slice(0, 10)
-    .map(
-      (song) => `
-      <tr>
-        <td style="padding: 15px; border-bottom: 1px solid #eee;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td width="60" style="padding-right: 15px;">
-                <img src="${song.imageUrl || "https://via.placeholder.com/60x60/ff6b35/ffffff?text=♪"}" 
-                     alt="${song.album}" 
-                     style="width: 60px; height: 60px; border-radius: 8px; object-fit: cover;">
-              </td>
-              <td>
-                <h3 style="margin: 0 0 5px 0; font-size: 16px; font-weight: 600; color: #1a1a1a;">
-                  ${song.name}
-                </h3>
-                <p style="margin: 0 0 3px 0; font-size: 14px; color: #666;">
-                  by ${song.artist}
-                </p>
-                <p style="margin: 0; font-size: 12px; color: #999;">
-                  ${song.streams.toLocaleString()} streams • ${song.popularity}/100 popularity
-                </p>
-              </td>
-              <td width="80" style="text-align: right;">
-                <a href="${song.spotifyUrl}" 
-                   style="display: inline-block; background: #1DB954; color: white; padding: 8px 12px; 
-                          text-decoration: none; border-radius: 20px; font-size: 12px; font-weight: 500;">
-                  Play
-                </a>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    `,
+      (release) => `
+    <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #fff;">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+        <tr>
+          <td style="width: 100px; vertical-align: top;">
+            <img src="${release.imageUrl}" alt="${release.album}" width="100" height="100" style="border-radius: 4px; object-fit: cover;">
+          </td>
+          <td style="padding-left: 15px; vertical-align: top;">
+            <h3 style="margin-top: 0; margin-bottom: 5px; color: #333;">${release.name}</h3>
+            <p style="margin-top: 0; margin-bottom: 5px; color: #555; font-size: 14px;">Artist: <strong>${release.artist}</strong></p>
+            <p style="margin-top: 0; margin-bottom: 5px; color: #555; font-size: 14px;">Album: ${release.album}</p>
+            <p style="margin-top: 0; margin-bottom: 10px; color: #777; font-size: 12px;">Released: ${release.releaseDate}</p>
+            <a href="${release.spotifyUrl}" style="display: inline-block; padding: 8px 15px; background-color: #1DB954; color: #ffffff; text-decoration: none; border-radius: 5px; font-size: 14px;">Listen on Spotify</a>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `,
     )
     .join("")
 
   return `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
     <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Afropulse Weekly Digest</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Afrobeats Weekly Digest</title>
+        <style>
+            body {
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background-color: #f4f4f4;
+                margin: 0;
+                padding: 0;
+            }
+            .container {
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            }
+            .header {
+                background-color: #222;
+                color: #ffffff;
+                padding: 20px;
+                text-align: center;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                background-image: linear-gradient(to right, #FF5722, #FFC107); /* Orange to Amber gradient */
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 28px;
+            }
+            .content {
+                padding: 20px;
+            }
+            .footer {
+                text-align: center;
+                padding: 20px;
+                font-size: 12px;
+                color: #777;
+                border-bottom-left-radius: 10px;
+                border-bottom-right-radius: 10px;
+                background-color: #f0f0f0;
+            }
+            .button {
+                display: inline-block;
+                padding: 10px 20px;
+                background-color: #1DB954; /* Spotify Green */
+                color: #ffffff;
+                text-decoration: none;
+                border-radius: 5px;
+            }
+            .release-item {
+                margin-bottom: 20px;
+                padding: 15px;
+                border: 1px solid #eee;
+                border-radius: 8px;
+                background-color: #fff;
+            }
+            .release-item img {
+                float: left;
+                margin-right: 15px;
+                border-radius: 4px;
+            }
+            .release-item h3 {
+                margin-top: 0;
+                margin-bottom: 5px;
+                color: #333;
+            }
+            .release-item p {
+                margin-top: 0;
+                margin-bottom: 5px;
+                color: #555;
+                font-size: 14px;
+            }
+        </style>
     </head>
-    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8f9fa;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; padding: 20px 0;">
-        <tr>
-          <td align="center">
-            <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-              
-              <!-- Header -->
-              <tr>
-                <td style="background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%); padding: 40px 30px; text-align: center;">
-                  <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 700;">
-                    🎵 Afropulse Weekly
-                  </h1>
-                  <p style="margin: 10px 0 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">
-                    Your weekly dose of fresh Afrobeats
-                  </p>
-                  <p style="margin: 5px 0 0 0; color: rgba(255,255,255,0.8); font-size: 14px;">
-                    ${currentDate}
-                  </p>
-                </td>
-              </tr>
-
-              <!-- Stats -->
-              <tr>
-                <td style="padding: 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); text-align: center;">
-                  <h2 style="margin: 0 0 15px 0; color: white; font-size: 20px;">This Week's Highlights</h2>
-                  <table width="100%" cellpadding="0" cellspacing="0">
-                    <tr>
-                      <td style="text-align: center; color: white;">
-                        <div style="font-size: 24px; font-weight: bold;">${newReleases.length}</div>
-                        <div style="font-size: 12px; opacity: 0.8;">New Releases</div>
-                      </td>
-                      <td style="text-align: center; color: white;">
-                        <div style="font-size: 24px; font-weight: bold;">${buzzingSongs.length}</div>
-                        <div style="font-size: 12px; opacity: 0.8;">Buzzing Songs</div>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-
-              <!-- New Releases Section -->
-              <tr>
-                <td style="padding: 30px;">
-                  <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #ff6b35; padding-bottom: 10px;">
-                    🔥 Fresh Releases (Last 7 Days)
-                  </h2>
-                  <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #eee; border-radius: 8px; overflow: hidden;">
-                    ${newReleasesHTML}
-                  </table>
-                </td>
-              </tr>
-
-              <!-- Buzzing Songs Section -->
-              <tr>
-                <td style="padding: 0 30px 30px 30px;">
-                  <h2 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #f7931e; padding-bottom: 10px;">
-                    📈 Buzzing Right Now
-                  </h2>
-                  <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #eee; border-radius: 8px; overflow: hidden;">
-                    ${buzzingSongsHTML}
-                  </table>
-                </td>
-              </tr>
-
-              <!-- Footer -->
-              <tr>
-                <td style="background-color: #f8f9fa; padding: 30px; text-align: center; border-top: 1px solid #eee;">
-                  <p style="margin: 0 0 15px 0; font-size: 16px; font-weight: 600; color: #1a1a1a;">
-                    Keep the rhythm alive! 🎶
-                  </p>
-                  <p style="margin: 0 0 20px 0; font-size: 14px; color: #666; line-height: 1.5;">
-                    Discover more African music and stay updated with the latest releases.
-                  </p>
-                  <p style="margin: 20px 0 0 0; font-size: 12px; color: #999;">
-                    You're receiving this because you subscribed to Afropulse weekly digest.<br>
-                    <a href="#" style="color: #ff6b35; text-decoration: none;">Unsubscribe</a> | 
-                    <a href="#" style="color: #ff6b35; text-decoration: none;">Update preferences</a>
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Afrobeats Weekly Digest 🔥</h1>
+                <p>Your weekly dose of the freshest Afrobeats releases!</p>
+            </div>
+            <div class="content">
+                <p>Hello Afrobeats Lover,</p>
+                <p>Here are the top new Afrobeats releases from the past week:</p>
+                ${releaseItems}
+                <p>Stay tuned for more amazing music next week!</p>
+                <p>Best,</p>
+                <p>The Afrobeats Digest Team</p>
+            </div>
+            <div class="footer">
+                <p>&copy; ${new Date().getFullYear()} Afrobeats Digest. All rights reserved.</p>
+                <p>You received this email because you subscribed to our weekly digest. <a href="${process.env.VERCEL_URL}/unsubscribe" style="color: #777;">Unsubscribe</a></p>
+            </div>
+        </div>
     </body>
     </html>
   `
@@ -263,137 +227,133 @@ function generateEmailHTML(newReleases: SpotifyTrack[], buzzingSongs: SpotifyTra
 
 export async function POST() {
   try {
-    console.log("🚀 Starting digest send process...")
+    console.log("📧 Starting weekly digest send...")
 
-    // Check email configuration
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-      console.error("❌ Email configuration missing")
-      return NextResponse.json({ error: "Email configuration missing" }, { status: 500 })
-    }
+    // Get active subscribers
+    const activeSubscribers = subscribers.filter((s) => s.verified)
 
-    // Get subscribers and content
-    console.log("📧 Getting subscribers...")
-    const subscribers = await getActiveSubscribers()
-
-    if (subscribers.length === 0) {
-      console.log("⚠️ No active subscribers found")
+    if (activeSubscribers.length === 0) {
       return NextResponse.json({
         message: "No active subscribers found",
         sent: 0,
-        total: 0,
       })
     }
 
-    console.log(`📊 Found ${subscribers.length} active subscribers`)
+    // Fetch latest releases
+    const tracks = await getNewReleasesForDigest()
 
-    // Fetch music data
-    console.log("🎵 Fetching music data...")
-    const [newReleases, buzzingSongs] = await Promise.all([fetchMusicData("releases"), fetchMusicData("buzzing")])
-
-    console.log(`🎶 Found ${newReleases.length} new releases, ${buzzingSongs.length} buzzing songs`)
-
-    if (newReleases.length === 0 && buzzingSongs.length === 0) {
-      console.log("⚠️ No content available for digest")
-      return NextResponse.json({ error: "No content available for digest" }, { status: 400 })
+    if (tracks.length === 0) {
+      return NextResponse.json({
+        error: "No tracks available for digest",
+        sent: 0,
+      })
     }
 
-    // Create transporter
-    console.log("📮 Setting up email transporter...")
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: GMAIL_USER,
-        pass: GMAIL_APP_PASSWORD,
-      },
-    })
-
-    // Verify transporter
-    try {
-      await transporter.verify()
-      console.log("✅ Email transporter verified")
-    } catch (error) {
-      console.error("❌ Email transporter verification failed:", error)
-      return NextResponse.json({ error: "Email service unavailable" }, { status: 500 })
+    // Create email transporter
+    if (!transporter) {
+      return NextResponse.json(
+        { message: "Email transporter not configured. Check GMAIL_USER and GMAIL_APP_PASSWORD environment variables." },
+        { status: 500 },
+      )
     }
 
-    // Generate email content
-    console.log("📝 Generating email content...")
-    const emailHTML = generateEmailHTML(newReleases, buzzingSongs)
-    const currentDate = formatDate(new Date().toISOString())
+    // Send emails
+    let sentCount = 0
+    const errors: string[] = []
 
-    // Send emails with proper error handling
-    console.log("📤 Sending emails...")
-    const emailPromises = subscribers.map(async (email, index) => {
+    for (const subscriber of activeSubscribers) {
       try {
-        // Add small delay between emails to avoid rate limiting
-        if (index > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-        }
+        const htmlContent = generateEmailHtml(tracks.slice(0, 20))
 
-        const mailOptions = {
-          from: `"Afropulse" <${GMAIL_USER}>`,
-          to: email,
-          subject: `🎵 Your Weekly Afrobeats Digest - ${currentDate}`,
-          html: emailHTML,
-        }
-
-        // Add timeout to email sending
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("Email timeout")), 30000)
+        await transporter.sendMail({
+          from: GMAIL_USER, // Sender address
+          to: subscriber.email, // List of recipients
+          subject: `🎵 Your Weekly Afrobeats Digest - ${tracks.length} Hot New Releases!`, // Subject line
+          html: htmlContent, // HTML body
         })
 
-        await Promise.race([transporter.sendMail(mailOptions), timeoutPromise])
+        sentCount++
+        console.log(`✅ Digest sent to: ${subscriber.email}`)
 
-        console.log(`✅ Email sent to ${email}`)
-        return { email, status: "sent" }
+        // Add delay between emails to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       } catch (error) {
-        console.error(`❌ Failed to send email to ${email}:`, error)
-        return { email, status: "failed", error: error.message }
+        console.error(`❌ Failed to send digest to ${subscriber.email}:`, error)
+        errors.push(`${subscriber.email}: ${error}`)
       }
-    })
+    }
 
-    const results = await Promise.allSettled(emailPromises)
-    const successful = results.filter(
-      (result) => result.status === "fulfilled" && result.value.status === "sent",
-    ).length
-
-    const failed = results.length - successful
-
-    console.log(`📊 Digest send complete: ${successful} successful, ${failed} failed`)
+    console.log(`📊 Digest sending complete: ${sentCount}/${activeSubscribers.length} sent`)
 
     return NextResponse.json({
-      message: `Weekly digest sent successfully!`,
-      sent: successful,
-      failed: failed,
-      total: subscribers.length,
-      newReleases: newReleases.length,
-      buzzingSongs: buzzingSongs.length,
-      timestamp: new Date().toISOString(),
+      message: `Weekly digest sent successfully`,
+      sent: sentCount,
+      total: activeSubscribers.length,
+      tracks: tracks.length,
+      errors: errors.length > 0 ? errors : undefined,
     })
   } catch (error) {
-    console.error("❌ Error sending digest:", error)
-    return NextResponse.json({ error: "Failed to send weekly digest" }, { status: 500 })
+    console.error("❌ Error sending weekly digest:", error)
+    return NextResponse.json(
+      {
+        error: "Failed to send weekly digest",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
 
 export async function GET() {
-  try {
-    const subscribers = await getActiveSubscribers()
-
-    return NextResponse.json({
-      message: "Digest service is ready",
-      activeSubscribers: subscribers.length,
-      status: "ready",
-      timestamp: new Date().toISOString(),
-    })
-  } catch (error) {
-    console.error("Error checking digest service:", error)
+  if (!transporter) {
     return NextResponse.json(
-      {
-        error: "Digest service unavailable",
-        details: error.message,
-      },
+      { message: "Email transporter not configured. Check GMAIL_USER and GMAIL_APP_PASSWORD environment variables." },
       { status: 500 },
     )
+  }
+
+  try {
+    const newReleases = await getNewReleasesForDigest()
+    const emailHtml = generateEmailHtml(newReleases)
+
+    const verifiedSubscribers = subscribers.filter((s) => s.verified)
+
+    if (verifiedSubscribers.length === 0) {
+      console.log("No verified subscribers to send digest to.")
+      return NextResponse.json({ message: "No verified subscribers to send digest to." }, { status: 200 })
+    }
+
+    let sentCount = 0
+    let failedCount = 0
+
+    for (const subscriber of verifiedSubscribers) {
+      try {
+        await transporter.sendMail({
+          from: GMAIL_USER, // Sender address
+          to: subscriber.email, // List of recipients
+          subject: "Your Weekly Afrobeats Digest is Here! 🔥", // Subject line
+          html: emailHtml, // HTML body
+        })
+        console.log(`Digest sent to: ${subscriber.email}`)
+        sentCount++
+        // Add a small delay to avoid hitting email provider rate limits
+        await new Promise((resolve) => setTimeout(resolve, 1000)) // 1 second delay
+      } catch (emailError) {
+        console.error(`Failed to send digest to ${subscriber.email}:`, emailError)
+        failedCount++
+      }
+    }
+
+    return NextResponse.json(
+      {
+        message: `Weekly digest sent. Sent to ${sentCount} subscribers, failed for ${failedCount}.`,
+        sentCount,
+        failedCount,
+      },
+      { status: 200 },
+    )
+  } catch (error) {
+    console.error("Error sending weekly digest:", error)
+    return NextResponse.json({ message: "Failed to send weekly digest", error: error.message }, { status: 500 })
   }
 }
