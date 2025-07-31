@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Check for Resend API key during build/runtime
+const RESEND_API_KEY = process.env.RESEND_API_KEY
+if (!RESEND_API_KEY) {
+  // This error will be caught during the build process if the key is missing
+  throw new Error("RESEND_API_KEY is not set. Please set it in your environment variables.")
+}
+const resend = new Resend(RESEND_API_KEY)
 
 // In-memory storage for subscribers (for demonstration purposes)
 // In a real application, you would use a database (e.g., Supabase, Neon, Vercel Postgres)
@@ -124,10 +130,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ message: "Missing email or token" }, { status: 400 })
   }
 
-  const subscriber = subscribers.find((s) => s.email === email && s.token === token)
+  const subscriber = subscribers.find((s) => s.email === email)
 
-  if (subscriber) {
+  if (subscriber && subscriber.token === token) {
     subscriber.verified = true
+    subscriber.token = "" // Clear token after verification
     console.log(`Email ${email} verified successfully.`)
     return NextResponse.json({ message: "Email verified successfully! You are now subscribed." }, { status: 200 })
   } else {
