@@ -257,6 +257,7 @@ async function getSpotifyAccessToken(): Promise<string | null> {
 async function fetchNewReleasesFromSpotify(accessToken: string): Promise<SpotifyTrack[]> {
   const afrobeatsTracks: SpotifyTrack[] = []
   const seenArtists = new Set<string>()
+  const FETCH_TIMEOUT_MS = 5000 // 5 seconds timeout for each fetch request
 
   try {
     console.log("🔍 Fetching new releases from Spotify's new-releases endpoint...")
@@ -265,15 +266,22 @@ async function fetchNewReleasesFromSpotify(accessToken: string): Promise<Spotify
     const markets = ["NG", "GH", "ZA", "KE", "US", "GB"] // Nigeria, Ghana, South Africa, Kenya, US, UK
 
     for (const market of markets) {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
       try {
         const response = await fetch(`https://api.spotify.com/v1/browse/new-releases?country=${market}&limit=50`, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
+          signal: controller.signal, // Apply the timeout signal
         })
+        clearTimeout(timeoutId) // Clear timeout if fetch completes
 
         if (!response.ok) {
-          console.log(`❌ Failed to fetch new releases for market ${market}: ${response.status}`)
+          console.log(
+            `❌ Failed to fetch new releases for market ${market}: ${response.status} - ${response.statusText}`,
+          )
           continue
         }
 
@@ -290,12 +298,16 @@ async function fetchNewReleasesFromSpotify(accessToken: string): Promise<Spotify
           if (!isWithinSevenDays(album.release_date)) continue
 
           // Get tracks from this album
+          const tracksController = new AbortController()
+          const tracksTimeoutId = setTimeout(() => tracksController.abort(), FETCH_TIMEOUT_MS)
           try {
             const tracksResponse = await fetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=10`, {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
               },
+              signal: tracksController.signal, // Apply timeout for tracks fetch
             })
+            clearTimeout(tracksTimeoutId)
 
             if (!tracksResponse.ok) continue
 
@@ -335,20 +347,29 @@ async function fetchNewReleasesFromSpotify(accessToken: string): Promise<Spotify
 
               if (afrobeatsTracks.length >= 20) break
             }
-          } catch (trackError) {
-            console.error(`Error fetching tracks for album ${album.id}:`, trackError)
+          } catch (trackError: any) {
+            if (trackError.name === "AbortError") {
+              console.error(`Timeout fetching tracks for album ${album.id}.`)
+            } else {
+              console.error(`Error fetching tracks for album ${album.id}:`, trackError)
+            }
             continue
           }
 
           if (afrobeatsTracks.length >= 20) break
         }
 
-        // Add small delay between market requests
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        // Add slightly increased delay between market requests
+        await new Promise((resolve) => setTimeout(resolve, 300))
 
         if (afrobeatsTracks.length >= 20) break
-      } catch (marketError) {
-        console.error(`Error fetching releases for market ${market}:`, marketError)
+      } catch (marketError: any) {
+        clearTimeout(timeoutId) // Ensure timeout is cleared even if error occurs before it fires
+        if (marketError.name === "AbortError") {
+          console.error(`Timeout fetching releases for market ${market}.`)
+        } else {
+          console.error(`❌ Error fetching releases for market ${market}:`, marketError)
+        }
         continue
       }
     }
