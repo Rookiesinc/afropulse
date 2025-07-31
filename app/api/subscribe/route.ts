@@ -1,4 +1,8 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+
+interface SubscribeRequest {
+  email: string
+}
 
 interface Subscriber {
   email: string
@@ -7,34 +11,36 @@ interface Subscriber {
   verifiedAt?: string
 }
 
-// In-memory storage for demo (in production, use a database)
-const subscribers: Subscriber[] = []
+// In-memory storage for demo purposes
+// In production, this would be stored in a database like Supabase
+const subscribers: Subscriber[] = [
+  {
+    email: "tobionisemo2020@gmail.com",
+    subscribedAt: new Date().toISOString(),
+    isActive: true,
+    verifiedAt: new Date().toISOString(),
+  },
+  {
+    email: "tosinogen2012@gmail.com",
+    subscribedAt: new Date().toISOString(),
+    isActive: true,
+    verifiedAt: new Date().toISOString(),
+  },
+]
 
 function isValidEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   return emailRegex.test(email)
 }
 
-export async function GET() {
+export async function POST(request: Request) {
   try {
-    const activeCount = subscribers.filter((sub) => sub.isActive).length
-    return NextResponse.json({
-      total: activeCount,
-      lastUpdated: new Date().toISOString(),
-    })
-  } catch (error) {
-    console.error("Error getting subscribers:", error)
-    return NextResponse.json({ error: "Failed to get subscribers" }, { status: 500 })
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
+    const body: SubscribeRequest = await request.json()
     const { email } = body
 
+    // Validate email
     if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
+      return NextResponse.json({ error: "Please provide a valid email address" }, { status: 400 })
     }
 
     const normalizedEmail = email.toLowerCase().trim()
@@ -44,69 +50,67 @@ export async function POST(request: NextRequest) {
 
     if (existingSubscriber) {
       if (existingSubscriber.isActive) {
-        return NextResponse.json({ error: "Email is already subscribed" }, { status: 409 })
+        return NextResponse.json(
+          {
+            message: "You're already subscribed to our weekly digest!",
+            status: "already_subscribed",
+          },
+          { status: 200 },
+        )
       } else {
         // Reactivate existing subscriber
         existingSubscriber.isActive = true
         existingSubscriber.subscribedAt = new Date().toISOString()
-        existingSubscriber.verifiedAt = new Date().toISOString()
+
+        console.log(`✅ Reactivated subscriber: ${normalizedEmail}`)
+
+        return NextResponse.json({
+          message: "Welcome back! You've been resubscribed to our weekly digest.",
+          status: "resubscribed",
+        })
       }
-    } else {
-      // Add new subscriber
-      const newSubscriber: Subscriber = {
-        email: normalizedEmail,
-        subscribedAt: new Date().toISOString(),
-        isActive: true,
-        verifiedAt: new Date().toISOString(),
-      }
-      subscribers.push(newSubscriber)
     }
 
-    const activeCount = subscribers.filter((sub) => sub.isActive).length
+    // Add new subscriber
+    const newSubscriber: Subscriber = {
+      email: normalizedEmail,
+      subscribedAt: new Date().toISOString(),
+      isActive: true,
+      verifiedAt: new Date().toISOString(), // Auto-verify for demo
+    }
+
+    subscribers.push(newSubscriber)
 
     console.log(`✅ New subscriber added: ${normalizedEmail}`)
+    console.log(`📊 Total active subscribers: ${subscribers.filter((s) => s.isActive).length}`)
 
     return NextResponse.json({
-      message: "Successfully subscribed to weekly digest!",
-      email: normalizedEmail,
-      total: activeCount,
+      message: "Successfully subscribed! You'll receive our weekly Afrobeats digest every Monday.",
+      status: "subscribed",
     })
   } catch (error) {
-    console.error("❌ Error subscribing email:", error)
-    return NextResponse.json({ error: "Failed to subscribe. Please try again." }, { status: 500 })
+    console.error("Error in subscribe API:", error)
+    return NextResponse.json({ error: "Failed to process subscription. Please try again." }, { status: 500 })
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export async function GET() {
   try {
-    const body = await request.json()
-    const { email } = body
-
-    if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
-    }
-
-    const normalizedEmail = email.toLowerCase().trim()
-
-    // Find and deactivate subscriber
-    const subscriber = subscribers.find((sub) => sub.email === normalizedEmail)
-
-    if (!subscriber) {
-      return NextResponse.json({ error: "Email not found in subscription list" }, { status: 404 })
-    }
-
-    subscriber.isActive = false
-    const activeCount = subscribers.filter((sub) => sub.isActive).length
-
-    console.log(`✅ Subscriber unsubscribed: ${normalizedEmail}`)
+    const activeSubscribers = subscribers.filter((sub) => sub.isActive)
 
     return NextResponse.json({
-      message: "Successfully unsubscribed from weekly digest",
-      email: normalizedEmail,
-      total: activeCount,
+      message: "Subscription service is active",
+      totalSubscribers: subscribers.length,
+      activeSubscribers: activeSubscribers.length,
+      status: "ready",
     })
   } catch (error) {
-    console.error("❌ Error unsubscribing email:", error)
-    return NextResponse.json({ error: "Failed to unsubscribe. Please try again." }, { status: 500 })
+    console.error("Error checking subscription service:", error)
+    return NextResponse.json({ error: "Subscription service unavailable" }, { status: 500 })
   }
+}
+
+// Export subscribers for use by other APIs (like send-digest)
+export function getActiveSubscribers(): string[] {
+  return subscribers.filter((sub) => sub.isActive).map((sub) => sub.email)
 }

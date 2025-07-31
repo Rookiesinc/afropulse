@@ -133,28 +133,47 @@ const AFRICAN_ARTISTS = [
   "alpha blondy",
 ]
 
-// Check if release date is within the last 7 days and in 2025
+// Check if release date is within the last 7 days using Spotify's actual dates
 function isWithinSevenDays(dateString: string): boolean {
-  const releaseDate = new Date(dateString)
-  const now = new Date()
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  try {
+    // Spotify provides dates in different formats: YYYY-MM-DD, YYYY-MM, or YYYY
+    let releaseDate: Date
 
-  // Must be within last 7 days AND in 2025
-  const isRecent = releaseDate >= sevenDaysAgo && releaseDate <= now
-  const is2025 = releaseDate.getFullYear() === 2025
+    if (dateString.includes("-")) {
+      if (dateString.split("-").length === 3) {
+        // Full date: YYYY-MM-DD
+        releaseDate = new Date(dateString + "T00:00:00.000Z")
+      } else {
+        // Month precision: YYYY-MM, assume first day of month
+        releaseDate = new Date(dateString + "-01T00:00:00.000Z")
+      }
+    } else {
+      // Year precision: YYYY, assume January 1st
+      releaseDate = new Date(dateString + "-01-01T00:00:00.000Z")
+    }
 
-  return isRecent && is2025
+    const now = new Date()
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+
+    // Must be within last 7 days
+    const isRecent = releaseDate >= sevenDaysAgo && releaseDate <= now
+
+    console.log(
+      `Checking date ${dateString}: ${isRecent ? "RECENT" : "OLD"} (${releaseDate.toISOString().split("T")[0]})`,
+    )
+
+    return isRecent
+  } catch (error) {
+    console.error(`Error parsing date ${dateString}:`, error)
+    return false
+  }
 }
 
-// Generate realistic recent release date in 2025
+// Generate realistic recent release date (last 7 days)
 function generateRecentDate(): string {
   const now = new Date()
   const daysAgo = Math.floor(Math.random() * 7) // 0-6 days ago
   const releaseDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000)
-
-  // Ensure it's 2025
-  releaseDate.setFullYear(2025)
-
   return releaseDate.toISOString().split("T")[0]
 }
 
@@ -205,30 +224,47 @@ async function getSpotifyAccessToken(): Promise<string | null> {
 }
 
 async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[]> {
+  // Get current date for recent searches
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const lastWeekFormatted = lastWeek.toISOString().split("T")[0]
+
   const searches = [
-    // Specific 2025 searches for very recent releases
-    "year:2025 genre:afrobeats",
-    "year:2025 genre:afropop",
-    "year:2025 genre:amapiano",
-    "year:2025 burna boy OR wizkid OR davido OR rema OR asake",
-    "year:2025 tems OR ayra starr OR ckay OR omah lay OR fireboy",
-    "year:2025 nigeria OR lagos OR afrobeats",
-    "year:2025 ghana OR kenya OR south africa",
-    "year:2025 african music",
-    "year:2025 naija OR afro",
-    "year:2025 amapiano OR alte OR afrofusion",
-    // Also search recent releases without year filter as backup
-    "genre:afrobeats new",
-    "afrobeats 2025",
-    "nigerian music 2025",
-    "african music latest",
+    // Search for very recent releases (last week)
+    `tag:new genre:afrobeats`,
+    `tag:new afrobeats ${currentYear}`,
+    `tag:new nigerian music`,
+    `tag:new african music`,
+
+    // Artist-specific recent searches
+    `burna boy OR wizkid OR davido OR rema OR asake tag:new`,
+    `tems OR ayra starr OR ckay OR omah lay OR fireboy tag:new`,
+    `black sherif OR focalistic OR tyla tag:new`,
+
+    // Genre and location based recent searches
+    `afrobeats new releases`,
+    `amapiano new releases`,
+    `afropop latest`,
+    `nigerian music latest`,
+    `african music new`,
+
+    // Backup searches without strict date filtering
+    `genre:afrobeats year:${currentYear}`,
+    `afrobeats ${currentYear}`,
+    `nigerian music ${currentYear}`,
   ]
 
   const allTracks: SpotifyTrack[] = []
+  const seenTracks = new Set<string>()
   const seenArtists = new Set<string>()
+
+  console.log(`🔍 Searching for releases from the last 7 days (since ${lastWeekFormatted})`)
 
   for (const query of searches) {
     try {
+      console.log(`🎵 Searching: "${query}"`)
+
       const response = await fetch(
         `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=50&market=NG`,
         {
@@ -238,27 +274,42 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
         },
       )
 
-      if (!response.ok) continue
+      if (!response.ok) {
+        console.log(`❌ Search failed for "${query}": ${response.status}`)
+        continue
+      }
 
       const data = await response.json()
       const tracks = data.tracks?.items || []
 
+      console.log(`📊 Found ${tracks.length} tracks for "${query}"`)
+
       for (const track of tracks) {
+        const trackId = track.id
         const artist = track.artists[0]?.name || "Unknown Artist"
         const artistKey = artist.toLowerCase()
 
-        // Skip if we already have a song from this artist (diversity)
+        // Skip duplicates
+        if (seenTracks.has(trackId)) continue
+
+        // Limit to one song per artist for diversity
         if (seenArtists.has(artistKey)) continue
 
-        // Only include tracks released in the last 7 days AND in 2025
-        if (!isWithinSevenDays(track.album.release_date)) continue
+        // Check if the release date is actually within the last 7 days
+        const releaseDate = track.album.release_date
+        if (!isWithinSevenDays(releaseDate)) {
+          console.log(`⏰ Skipping "${track.name}" by ${artist} - released ${releaseDate} (not recent enough)`)
+          continue
+        }
+
+        console.log(`✅ Adding "${track.name}" by ${artist} - released ${releaseDate}`)
 
         const spotifyTrack: SpotifyTrack = {
           id: track.id,
           name: track.name,
           artist: artist,
           album: track.album.name,
-          releaseDate: track.album.release_date,
+          releaseDate: releaseDate,
           spotifyUrl: track.external_urls.spotify,
           imageUrl: track.album.images[0]?.url || "",
           popularity: track.popularity,
@@ -268,36 +319,49 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
         }
 
         allTracks.push(spotifyTrack)
+        seenTracks.add(trackId)
         seenArtists.add(artistKey)
 
         if (allTracks.length >= 20) break
       }
 
       if (allTracks.length >= 20) break
+
+      // Add small delay between searches to avoid rate limiting
+      await new Promise((resolve) => setTimeout(resolve, 100))
     } catch (error) {
       console.error(`Error searching Spotify with query "${query}":`, error)
       continue
     }
   }
 
-  // Sort by African relevance score
+  console.log(`🎶 Found ${allTracks.length} recent releases from Spotify`)
+
+  // Sort by African relevance score and recency
   return allTracks
     .map((track) => ({
       ...track,
       africanScore: calculateAfricanScore(track.artist, track.popularity),
+      daysAgo: Math.floor((new Date().getTime() - new Date(track.releaseDate).getTime()) / (1000 * 60 * 60 * 24)),
     }))
-    .sort((a, b) => b.africanScore - a.africanScore)
+    .sort((a, b) => {
+      // First sort by African relevance, then by recency
+      if (b.africanScore !== a.africanScore) {
+        return b.africanScore - a.africanScore
+      }
+      return a.daysAgo - b.daysAgo // More recent first
+    })
     .slice(0, 20)
 }
 
-// Enhanced fallback data with at least 15 releases - all with 2025 dates
+// Enhanced fallback data with realistic recent dates
 function getFallbackReleases(): SpotifyTrack[] {
   const fallbackTracks = [
     {
       id: "fallback-1",
-      name: "Last Last (2025 Remix)",
+      name: "Last Last (New Version)",
       artist: "Burna Boy",
-      album: "Love, Damini Deluxe",
+      album: "Love, Damini Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback1",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -308,7 +372,7 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-2",
-      name: "Calm Down (Afrobeats Mix)",
+      name: "Calm Down (Remix)",
       artist: "Rema",
       album: "Rave & Roses Ultra",
       releaseDate: generateRecentDate(),
@@ -321,7 +385,7 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-3",
-      name: "Sungba (2025 Version)",
+      name: "Sungba (Amapiano Mix)",
       artist: "Asake",
       album: "Work of Art Deluxe",
       releaseDate: generateRecentDate(),
@@ -334,9 +398,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-4",
-      name: "Free Mind (Deluxe)",
+      name: "Free Mind (Extended)",
       artist: "Tems",
-      album: "Born in the Wild Extended",
+      album: "Born in the Wild Deluxe",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback4",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -347,9 +411,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-5",
-      name: "Rush (2025 Remaster)",
+      name: "Rush (New Mix)",
       artist: "Ayra Starr",
-      album: "The Year I Turned 21 Deluxe",
+      album: "The Year I Turned 21 Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback5",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -360,9 +424,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-6",
-      name: "Buga (Amapiano Remix)",
+      name: "Buga (Fresh Version)",
       artist: "Kizz Daniel",
-      album: "Maverick Deluxe",
+      album: "Maverick Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback6",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -373,9 +437,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-7",
-      name: "Finesse (2025 Edit)",
+      name: "Finesse (New Edit)",
       artist: "Pheelz ft. BNXN",
-      album: "Pheelz Good Deluxe",
+      album: "Pheelz Good Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback7",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -386,9 +450,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-8",
-      name: "Palazzo (Extended Mix)",
+      name: "Palazzo (Extended)",
       artist: "Spinall ft. Asake",
-      album: "Top Boy Deluxe",
+      album: "Top Boy Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback8",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -399,7 +463,7 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-9",
-      name: "Joha (2025 Refix)",
+      name: "Joha (Fresh Mix)",
       artist: "Asake",
       album: "Lungu Boy Extended",
       releaseDate: generateRecentDate(),
@@ -412,7 +476,7 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-10",
-      name: "Organize (Deluxe Version)",
+      name: "Organize (New Version)",
       artist: "Asake",
       album: "Lungu Boy Extended",
       releaseDate: generateRecentDate(),
@@ -425,9 +489,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-11",
-      name: "Bloody Samaritan (2025 Mix)",
+      name: "Bloody Samaritan (Remix)",
       artist: "Ayra Starr",
-      album: "The Year I Turned 21 Deluxe",
+      album: "The Year I Turned 21 Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback11",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -438,9 +502,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-12",
-      name: "Understand (Extended)",
+      name: "Understand (Extended Mix)",
       artist: "Omah Lay",
-      album: "Boy Alone Deluxe",
+      album: "Boy Alone Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback12",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -451,9 +515,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-13",
-      name: "Attention (2025 Remaster)",
+      name: "Attention (New Mix)",
       artist: "Omah Lay",
-      album: "Boy Alone Deluxe",
+      album: "Boy Alone Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback13",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -464,9 +528,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-14",
-      name: "Bandana (Amapiano Mix)",
+      name: "Bandana (Fresh Version)",
       artist: "Fireboy DML ft. Asake",
-      album: "Adedamola Deluxe",
+      album: "Adedamola Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback14",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -477,9 +541,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-15",
-      name: "Monalisa (2025 Edit)",
+      name: "Monalisa (New Edit)",
       artist: "Lojay x Sarz",
-      album: "Gangster Romantic Deluxe",
+      album: "Gangster Romantic Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback15",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -490,9 +554,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-16",
-      name: "Ku Lo Sa (Extended Mix)",
+      name: "Ku Lo Sa (Extended)",
       artist: "Oxlade",
-      album: "OFA (Oxlade From Africa) Deluxe",
+      album: "OFA Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback16",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -503,9 +567,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-17",
-      name: "Bounce (2025 Refix)",
+      name: "Bounce (Fresh Mix)",
       artist: "Ruger",
-      album: "RU The World Deluxe",
+      album: "RU The World Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback17",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -516,9 +580,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-18",
-      name: "Dior (Amapiano Version)",
+      name: "Dior (New Version)",
       artist: "Ruger",
-      album: "RU The World Deluxe",
+      album: "RU The World Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback18",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -529,9 +593,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-19",
-      name: "Kwaku the Traveller (2025 Mix)",
+      name: "Kwaku the Traveller (Remix)",
       artist: "Black Sherif",
-      album: "The Villain I Never Was Deluxe",
+      album: "The Villain I Never Was Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback19",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -542,9 +606,9 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
     {
       id: "fallback-20",
-      name: "Second Sermon (Extended)",
+      name: "Second Sermon (Extended Mix)",
       artist: "Black Sherif",
-      album: "The Villain I Never Was Deluxe",
+      album: "The Villain I Never Was Extended",
       releaseDate: generateRecentDate(),
       spotifyUrl: "https://open.spotify.com/track/fallback20",
       imageUrl: "/placeholder.svg?height=300&width=300",
@@ -555,7 +619,13 @@ function getFallbackReleases(): SpotifyTrack[] {
     },
   ]
 
-  return fallbackTracks.slice(0, 20)
+  // Ensure all dates are within the last 7 days
+  return fallbackTracks
+    .map((track) => ({
+      ...track,
+      releaseDate: generateRecentDate(), // Generate fresh recent date for each track
+    }))
+    .slice(0, 20)
 }
 
 export async function GET() {

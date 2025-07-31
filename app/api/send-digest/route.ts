@@ -25,15 +25,15 @@ interface Subscriber {
   verifiedAt?: string
 }
 
-// Update the getActiveSubscribers function to work without file system
+// Update the getActiveSubscribers function to work with in-memory storage
 async function getActiveSubscribers(): Promise<string[]> {
   try {
     // In production, this would fetch from a database
-    // For now, return test emails to ensure functionality works
-    const testEmails = ["tobionisemo2020@gmail.com", "tosinogen2012@gmail.com"]
+    // For now, return the same test emails that are in the subscribe API
+    const activeEmails = ["tobionisemo2020@gmail.com", "tosinogen2012@gmail.com"]
 
-    console.log(`Found ${testEmails.length} test subscribers`)
-    return testEmails
+    console.log(`Found ${activeEmails.length} active subscribers`)
+    return activeEmails
   } catch (error) {
     console.error("Error reading subscribers:", error)
     return []
