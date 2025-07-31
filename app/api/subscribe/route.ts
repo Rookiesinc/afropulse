@@ -1,40 +1,68 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { promises as fs } from "fs"
 import path from "path"
 
 interface Subscriber {
   email: string
-  verified: boolean
-  subscribed_at: string
-  unsubscribed_at?: string
-  status: "active" | "unsubscribed" | "pending"
+  subscribedAt: string
+  isActive: boolean
+  verificationToken?: string
+  verifiedAt?: string
 }
 
-const SUBSCRIBERS_FILE = path.join(process.cwd(), "data", "subscribers.json")
+interface SubscriberData {
+  subscribers: Subscriber[]
+  total: number
+  lastUpdated: string
+}
 
-async function ensureDataDirectory() {
-  const dataDir = path.join(process.cwd(), "data")
+async function getSubscribers(): Promise<SubscriberData> {
   try {
-    await fs.access(dataDir)
-  } catch {
+    const dataDir = path.join(process.cwd(), "data")
+    const filePath = path.join(dataDir, "subscribers.json")
+
+    // Ensure directory exists
     await fs.mkdir(dataDir, { recursive: true })
-  }
-}
 
-async function readSubscribers(): Promise<Subscriber[]> {
-  try {
-    await ensureDataDirectory()
-    const data = await fs.readFile(SUBSCRIBERS_FILE, "utf-8")
-    return JSON.parse(data)
+    try {
+      const data = await fs.readFile(filePath, "utf8")
+      const parsed = JSON.parse(data)
+      return {
+        subscribers: parsed.subscribers || [],
+        total: parsed.total || 0,
+        lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+      }
+    } catch (error) {
+      // File doesn't exist, return empty data
+      return {
+        subscribers: [],
+        total: 0,
+        lastUpdated: new Date().toISOString(),
+      }
+    }
   } catch (error) {
-    // File doesn't exist or is empty, return empty array
-    return []
+    console.error("Error reading subscribers:", error)
+    return {
+      subscribers: [],
+      total: 0,
+      lastUpdated: new Date().toISOString(),
+    }
   }
 }
 
-async function writeSubscribers(subscribers: Subscriber[]): Promise<void> {
-  await ensureDataDirectory()
-  await fs.writeFile(SUBSCRIBERS_FILE, JSON.stringify(subscribers, null, 2))
+async function saveSubscribers(data: SubscriberData): Promise<void> {
+  try {
+    const dataDir = path.join(process.cwd(), "data")
+    const filePath = path.join(dataDir, "subscribers.json")
+
+    // Ensure directory exists
+    await fs.mkdir(dataDir, { recursive: true })
+
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2))
+  } catch (error) {
+    console.error("Error saving subscribers:", error)
+    throw error
+  }
 }
 
 function isValidEmail(email: string): boolean {
@@ -42,88 +70,101 @@ function isValidEmail(email: string): boolean {
   return emailRegex.test(email)
 }
 
-export async function POST(request: Request) {
+export async function GET() {
   try {
-    const { email } = await request.json()
-
-    if (!email) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 })
-    }
-
-    if (!isValidEmail(email)) {
-      return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 })
-    }
-
-    const normalizedEmail = email.toLowerCase().trim()
-    const subscribers = await readSubscribers()
-
-    // Check if email already exists
-    const existingSubscriber = subscribers.find((sub) => sub.email === normalizedEmail)
-
-    if (existingSubscriber) {
-      if (existingSubscriber.status === "active") {
-        return NextResponse.json({ error: "Email is already subscribed to our newsletter" }, { status: 400 })
-      } else if (existingSubscriber.status === "unsubscribed") {
-        // Reactivate the subscription
-        existingSubscriber.status = "active"
-        existingSubscriber.verified = true
-        existingSubscriber.subscribed_at = new Date().toISOString()
-        delete existingSubscriber.unsubscribed_at
-
-        await writeSubscribers(subscribers)
-
-        return NextResponse.json({
-          success: true,
-          message: "Welcome back! Your subscription has been reactivated.",
-        })
-      }
-    }
-
-    // Add new subscriber
-    const newSubscriber: Subscriber = {
-      email: normalizedEmail,
-      verified: true, // Auto-verify for simplicity
-      subscribed_at: new Date().toISOString(),
-      status: "active",
-    }
-
-    subscribers.push(newSubscriber)
-    await writeSubscribers(subscribers)
-
-    console.log(`✅ New subscriber added: ${normalizedEmail}`)
-
+    const data = await getSubscribers()
     return NextResponse.json({
-      success: true,
-      message: "Successfully subscribed! You'll receive our weekly digest every Friday.",
+      total: data.total,
+      lastUpdated: data.lastUpdated,
     })
-  } catch (error: any) {
-    console.error("❌ Error in subscribe API:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to subscribe. Please try again later.",
-        details: error.message,
-      },
-      { status: 500 },
-    )
+  } catch (error) {
+    console.error("Error getting subscribers:", error)
+    return NextResponse.json({ error: "Failed to get subscribers" }, { status: 500 })
   }
 }
 
-export async function GET() {
+export async function POST(request: NextRequest) {
   try {
-    const subscribers = await readSubscribers()
-    const activeSubscribers = subscribers.filter((sub) => sub.status === "active")
+    const { email } = await request.json()
+
+    if (!email || !isValidEmail(email)) {
+      return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+    const data = await getSubscribers()
+
+    // Check if email already exists
+    const existingSubscriber = data.subscribers.find((sub) => sub.email === normalizedEmail)
+
+    if (existingSubscriber) {
+      if (existingSubscriber.isActive) {
+        return NextResponse.json({ error: "Email is already subscribed" }, { status: 409 })
+      } else {
+        // Reactivate existing subscriber
+        existingSubscriber.isActive = true
+        existingSubscriber.subscribedAt = new Date().toISOString()
+        existingSubscriber.verifiedAt = new Date().toISOString()
+      }
+    } else {
+      // Add new subscriber
+      const newSubscriber: Subscriber = {
+        email: normalizedEmail,
+        subscribedAt: new Date().toISOString(),
+        isActive: true,
+        verifiedAt: new Date().toISOString(),
+      }
+      data.subscribers.push(newSubscriber)
+    }
+
+    // Update totals
+    data.total = data.subscribers.filter((sub) => sub.isActive).length
+    data.lastUpdated = new Date().toISOString()
+
+    await saveSubscribers(data)
 
     return NextResponse.json({
-      total: subscribers.length,
-      active: activeSubscribers.length,
-      subscribers: activeSubscribers.map((sub) => ({
-        email: sub.email,
-        subscribed_at: sub.subscribed_at,
-        verified: sub.verified,
-      })),
+      message: "Successfully subscribed to weekly digest!",
+      email: normalizedEmail,
+      total: data.total,
     })
-  } catch (error: any) {
-    console.error("❌ Error fetching subscribers:", error)
-    return NextResponse.json({ error: "Failed to fetch subscribers" }, { status: 500 })
+  } catch (error) {
+    console.error("Error subscribing email:", error)
+    return NextResponse.json({ error: "Failed to subscribe. Please try again." }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { email } = await request.json()
+
+    if (!email || !isValidEmail(email)) {
+      return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+    const data = await getSubscribers()
+
+    // Find and deactivate subscriber
+    const subscriber = data.subscribers.find((sub) => sub.email === normalizedEmail)
+
+    if (!subscriber) {
+      return NextResponse.json({ error: "Email not found in subscription list" }, { status: 404 })
+    }
+
+    subscriber.isActive = false
+    data.total = data.subscribers.filter((sub) => sub.isActive).length
+    data.lastUpdated = new Date().toISOString()
+
+    await saveSubscribers(data)
+
+    return NextResponse.json({
+      message: "Successfully unsubscribed from weekly digest",
+      email: normalizedEmail,
+      total: data.total,
+    })
+  } catch (error) {
+    console.error("Error unsubscribing email:", error)
+    return NextResponse.json({ error: "Failed to unsubscribe. Please try again." }, { status: 500 })
   }
 }

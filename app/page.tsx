@@ -4,490 +4,191 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Music,
   TrendingUp,
   Calendar,
-  Loader2,
-  RefreshCw,
-  Star,
-  Play,
-  Users,
   Mail,
-  Search,
-  Filter,
-  Heart,
-  Share2,
-  Volume2,
-  FlameIcon as Fire,
-  Eye,
-  ThumbsUp,
+  Send,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Play,
   ExternalLink,
-  Activity,
+  Flame,
+  Clock,
+  Globe,
+  Headphones,
+  Star,
+  Volume2,
 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 
-interface Song {
+interface SpotifyTrack {
   id: string
   name: string
   artist: string
   album: string
   releaseDate: string
   spotifyUrl: string
-  genre: string
+  imageUrl: string
   popularity: number
-  streams?: number
-  buzzScore?: number
-  isNewArtist?: boolean
-  artistScore?: number
+  genre: string
+  streams: number
   previewUrl?: string
 }
 
-interface TrendingNews {
-  id: string
-  title: string
-  summary: string
-  category: string
-  trendingScore: number
-  viralityIndex: number
-  artistMentions: string[]
-  engagement: {
-    views: number
-    likes: number
-    shares: number
-  }
-  publishedAt: string
-  breaking: boolean
-}
-
 interface ApiResponse {
-  songs: Song[]
-  cached?: boolean
+  songs: SpotifyTrack[]
   dataSource: string
-  discoveredArtists?: number
-  timestamp: string
-  totalFetched?: number
-  error?: string
+  searchPeriod: string
+  lastUpdated: string
+  manuallySelectedCount?: number
 }
 
 export default function HomePage() {
-  const [newReleases, setNewReleases] = useState<Song[]>([])
-  const [buzzingSongs, setBuzzingSongs] = useState<Song[]>([])
-  const [trendingNews, setTrendingNews] = useState<TrendingNews[]>([])
+  const [newReleases, setNewReleases] = useState<SpotifyTrack[]>([])
+  const [buzzingSongs, setBuzzingSongs] = useState<SpotifyTrack[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [email, setEmail] = useState("")
-  const [subscribing, setSubscribing] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [filteredReleases, setFilteredReleases] = useState<Song[]>([])
-  const [filteredBuzzing, setFilteredBuzzing] = useState<Song[]>([])
-  const [selectedGenre, setSelectedGenre] = useState("all")
-  const [lastUpdated, setLastUpdated] = useState<string>("")
+  const [isSubscribing, setIsSubscribing] = useState(false)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<"idle" | "success" | "error">("idle")
   const [dataSource, setDataSource] = useState<string>("")
-  const [discoveredArtists, setDiscoveredArtists] = useState<number>(0)
+  const [lastUpdated, setLastUpdated] = useState<string>("")
 
   useEffect(() => {
     fetchData()
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(fetchData, 5 * 60 * 1000)
-    return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    filterSongs()
-  }, [searchQuery, selectedGenre, newReleases, buzzingSongs])
-
-  const fetchData = async (showRefreshing = false) => {
+  const fetchData = async () => {
     try {
-      if (showRefreshing) setRefreshing(true)
-      else setLoading(true)
+      setLoading(true)
 
-      // Fetch with timeout protection
-      const fetchWithTimeout = (url: string, timeout = 15000) => {
-        return Promise.race([
-          fetch(url),
-          new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeout)),
-        ])
-      }
+      const [releasesRes, buzzingRes] = await Promise.all([fetch("/api/releases"), fetch("/api/buzzing")])
 
-      const [releasesRes, buzzingRes] = await Promise.allSettled([
-        fetchWithTimeout("/api/releases"),
-        fetchWithTimeout("/api/buzzing"),
-      ])
+      const releases: ApiResponse = releasesRes.ok
+        ? await releasesRes.json()
+        : { songs: [], dataSource: "error", searchPeriod: "", lastUpdated: "" }
+      const buzzing: ApiResponse = buzzingRes.ok
+        ? await buzzingRes.json()
+        : { songs: [], dataSource: "error", searchPeriod: "", lastUpdated: "" }
 
-      // Handle releases response
-      let releasesData: ApiResponse = { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
-      if (releasesRes.status === "fulfilled" && releasesRes.value.ok) {
-        releasesData = await releasesRes.value.json()
-      } else {
-        console.error("Failed to fetch releases:", releasesRes.status === "rejected" ? releasesRes.reason : "API error")
-      }
-
-      // Handle buzzing response
-      let buzzingData: ApiResponse = { songs: [], dataSource: "error", timestamp: new Date().toISOString() }
-      if (buzzingRes.status === "fulfilled" && buzzingRes.value.ok) {
-        buzzingData = await buzzingRes.value.json()
-      } else {
-        console.error("Failed to fetch buzzing:", buzzingRes.status === "rejected" ? buzzingRes.reason : "API error")
-      }
-
-      setNewReleases(releasesData.songs || [])
-      setBuzzingSongs(buzzingData.songs || [])
-      setLastUpdated(releasesData.timestamp || new Date().toISOString())
-      setDataSource(releasesData.dataSource || "unknown")
-      setDiscoveredArtists(releasesData.discoveredArtists || 0)
-
-      // Generate trending news
-      const trendingNewsData = generateTrendingNews()
-      setTrendingNews(trendingNewsData)
-
-      if (releasesData.error || buzzingData.error) {
-        toast({
-          title: "Data Warning",
-          description: releasesData.error || buzzingData.error || "Some data may be limited",
-          variant: "destructive",
-        })
-      }
+      setNewReleases(releases.songs || [])
+      setBuzzingSongs(buzzing.songs || [])
+      setDataSource(releases.dataSource || buzzing.dataSource || "unknown")
+      setLastUpdated(releases.lastUpdated || buzzing.lastUpdated || "")
     } catch (error) {
       console.error("Error fetching data:", error)
       toast({
-        title: "Connection Error",
-        description: "Using cached data. Check your internet connection.",
+        title: "Error",
+        description: "Failed to load music data. Please try again.",
         variant: "destructive",
       })
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
-  }
-
-  const generateTrendingNews = (): TrendingNews[] => {
-    const trendingTopics = [
-      {
-        title: "🔥 Burna Boy's 'African Giant 2' Breaks Spotify Records in First 24 Hours",
-        summary: "The Grammy winner's surprise album shatters streaming records with 50M plays in 24 hours.",
-        category: "Breaking News",
-        trendingScore: 98,
-        viralityIndex: 95,
-        artistMentions: ["Burna Boy", "Drake", "Rihanna", "Wizkid"],
-        breaking: true,
-      },
-      {
-        title: "🚨 BREAKING: Tyla Becomes First African Artist to Win Grammy for Best Pop Vocal Album",
-        summary: "South African sensation Tyla makes history at the Grammy Awards.",
-        category: "Awards",
-        trendingScore: 96,
-        viralityIndex: 92,
-        artistMentions: ["Tyla"],
-        breaking: true,
-      },
-      {
-        title: "⚡ Wizkid vs Davido Twitter Space Draws 2.5 Million Listeners Live",
-        summary: "The legendary rivals finally face off in a Twitter Space that crashes the platform.",
-        category: "Social Media",
-        trendingScore: 94,
-        viralityIndex: 89,
-        artistMentions: ["Wizkid", "Davido"],
-        breaking: false,
-      },
-      {
-        title: "🎵 Asake's 'Lungu Boy' Album Debuts at #1 on Billboard 200",
-        summary: "The YBNL star becomes the third Nigerian artist to top the Billboard 200.",
-        category: "Charts",
-        trendingScore: 91,
-        viralityIndex: 85,
-        artistMentions: ["Asake"],
-        breaking: false,
-      },
-      {
-        title: "💥 Rema Announces $100M Deal with Universal Music Group",
-        summary: "The 'Calm Down' hitmaker signs the biggest record deal in African music history.",
-        category: "Industry News",
-        trendingScore: 89,
-        viralityIndex: 82,
-        artistMentions: ["Rema"],
-        breaking: false,
-      },
-    ]
-
-    return trendingTopics.map((topic, i) => ({
-      id: `trending-news-${i + 1}`,
-      title: topic.title,
-      summary: topic.summary,
-      category: topic.category,
-      trendingScore: topic.trendingScore,
-      viralityIndex: topic.viralityIndex,
-      artistMentions: topic.artistMentions,
-      engagement: {
-        views: Math.floor(Math.random() * 2000000) + 500000,
-        likes: Math.floor(Math.random() * 100000) + 25000,
-        shares: Math.floor(Math.random() * 50000) + 10000,
-      },
-      publishedAt: new Date(Date.now() - Math.random() * 6 * 60 * 60 * 1000).toISOString(),
-      breaking: topic.breaking,
-    }))
-  }
-
-  const filterSongs = () => {
-    const filterFunction = (songs: Song[]) => {
-      return songs.filter((song) => {
-        const matchesSearch =
-          song.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          song.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          song.album.toLowerCase().includes(searchQuery.toLowerCase())
-
-        const matchesGenre = selectedGenre === "all" || song.genre.toLowerCase().includes(selectedGenre.toLowerCase())
-
-        return matchesSearch && matchesGenre
-      })
-    }
-
-    setFilteredReleases(filterFunction(newReleases))
-    setFilteredBuzzing(filterFunction(buzzingSongs))
   }
 
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email) return
+    if (!email.trim()) return
+
+    setIsSubscribing(true)
+    setSubscriptionStatus("idle")
 
     try {
-      setSubscribing(true)
-
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
-
       const response = await fetch("/api/subscribe", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
-        signal: controller.signal,
+        body: JSON.stringify({ email: email.trim() }),
       })
 
-      clearTimeout(timeoutId)
       const data = await response.json()
 
       if (response.ok) {
-        toast({
-          title: "Success!",
-          description: data.message,
-        })
+        setSubscriptionStatus("success")
         setEmail("")
-      } else {
         toast({
-          title: "Error",
-          description: data.error || "Failed to subscribe",
+          title: "Successfully subscribed! 🎉",
+          description: "You'll receive our weekly Afrobeats digest every Friday.",
+        })
+      } else {
+        setSubscriptionStatus("error")
+        toast({
+          title: "Subscription failed",
+          description: data.error || "Please try again later.",
           variant: "destructive",
         })
       }
-    } catch (error: any) {
-      console.error("Error subscribing:", error)
-      if (error.name === "AbortError") {
-        toast({
-          title: "Timeout",
-          description: "Request timed out. Please try again.",
-          variant: "destructive",
-        })
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to subscribe. Please try again.",
-          variant: "destructive",
-        })
-      }
+    } catch (error) {
+      setSubscriptionStatus("error")
+      toast({
+        title: "Network error",
+        description: "Please check your connection and try again.",
+        variant: "destructive",
+      })
     } finally {
-      setSubscribing(false)
+      setIsSubscribing(false)
     }
   }
 
-  const handleRefresh = () => {
-    fetchData(true)
-  }
-
-  const getDataSourceBadge = () => {
-    const badges = {
-      spotify_live: { text: "Live", color: "bg-green-500" },
-      spotify_mixed: { text: "Mixed", color: "bg-blue-500" },
-      spotify_cached: { text: "Cached", color: "bg-yellow-500" },
-      fallback: { text: "Fallback", color: "bg-orange-500" },
-      error_fallback: { text: "Offline", color: "bg-red-500" },
-      error: { text: "Error", color: "bg-red-500" },
-    }
-
-    const badge = badges[dataSource as keyof typeof badges] || { text: "Unknown", color: "bg-gray-500" }
-
-    return <Badge className={`${badge.color} text-white text-xs`}>{badge.text}</Badge>
-  }
-
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) {
-      return `${(num / 1000000).toFixed(1)}M`
-    } else if (num >= 1000) {
-      return `${(num / 1000).toFixed(1)}K`
-    }
-    return num.toString()
-  }
-
-  const getDaysAgo = (dateString: string) => {
+  const getDaysAgo = (dateString: string): string => {
     const releaseDate = new Date(dateString)
     const now = new Date()
     const diffTime = Math.abs(now.getTime() - releaseDate.getTime())
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
 
+    if (diffDays === 0) return "Today"
     if (diffDays === 1) return "1 day ago"
-    if (diffDays <= 7) return `${diffDays} days ago`
-    return "Over a week ago"
+    return `${diffDays} days ago`
   }
 
-  const SongCard = ({ song, index, showBuzzScore = false }: { song: Song; index: number; showBuzzScore?: boolean }) => (
-    <Card className="hover:shadow-md transition-shadow duration-200 group">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-              {index + 1}
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-gray-900 truncate group-hover:text-orange-600 transition-colors">
-                {song.name}
-              </h3>
-              <p className="text-sm text-gray-600 truncate flex items-center gap-1">
-                {song.artist}
-                {song.isNewArtist && (
-                  <Badge variant="outline" className="text-xs px-1 py-0">
-                    <Star className="w-3 h-3 mr-1" />
-                    New
-                  </Badge>
-                )}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {showBuzzScore && song.buzzScore && (
-              <Badge variant="secondary" className="text-xs">
-                {song.buzzScore}/100
-              </Badge>
-            )}
-            <Badge variant="outline" className="text-xs">
-              {song.popularity}%
-            </Badge>
-          </div>
-        </div>
+  const isVeryRecent = (dateString: string): boolean => {
+    const releaseDate = new Date(dateString)
+    const now = new Date()
+    const diffTime = Math.abs(now.getTime() - releaseDate.getTime())
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+    return diffDays <= 2
+  }
 
-        <div className="space-y-2 text-sm text-gray-600">
-          <p className="truncate">
-            <span className="font-medium">Album:</span> {song.album}
-          </p>
-          <p className="flex items-center justify-between">
-            <span>
-              <span className="font-medium">Released:</span> {getDaysAgo(song.releaseDate)}
-            </span>
-            <Badge variant={getDaysAgo(song.releaseDate).includes("day") ? "default" : "secondary"} className="text-xs">
-              {getDaysAgo(song.releaseDate).includes("day") ? "🔥 Fresh" : "Recent"}
-            </Badge>
-          </p>
-          <div className="flex items-center justify-between">
-            <Badge variant="outline" className="text-xs">
-              {song.genre}
-            </Badge>
-            {song.streams && <span className="text-xs text-gray-500">{song.streams.toLocaleString()} streams</span>}
-          </div>
-        </div>
+  const formatStreams = (streams: number): string => {
+    if (streams >= 1000000) {
+      return `${(streams / 1000000).toFixed(1)}M`
+    } else if (streams >= 1000) {
+      return `${(streams / 1000).toFixed(0)}K`
+    }
+    return streams.toString()
+  }
 
-        <div className="flex items-center gap-2 mt-4">
-          <Button
-            size="sm"
-            onClick={() => window.open(song.spotifyUrl, "_blank")}
-            className="flex-1 bg-green-600 hover:bg-green-700"
-          >
-            <Play className="w-4 h-4 mr-1" />
-            Play on Spotify
-          </Button>
-          {song.previewUrl && (
-            <Button size="sm" variant="outline" onClick={() => window.open(song.previewUrl, "_blank")}>
-              <Volume2 className="w-4 h-4" />
-            </Button>
-          )}
-          <Button size="sm" variant="outline">
-            <Heart className="w-4 h-4" />
-          </Button>
-          <Button size="sm" variant="outline">
-            <Share2 className="w-4 h-4" />
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-
-  const TrendingNewsCard = ({ news }: { news: TrendingNews }) => (
-    <Card className="hover:shadow-lg transition-shadow border-l-4 border-l-red-500">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              {news.breaking && (
-                <Badge className="bg-red-500 text-white text-xs animate-pulse">
-                  <Activity className="w-3 h-3 mr-1" />
-                  BREAKING
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-xs">
-                {news.category}
-              </Badge>
-              <Badge className="bg-orange-500 text-white text-xs">🔥 {news.trendingScore}</Badge>
-            </div>
-            <CardTitle className="text-sm leading-tight hover:text-red-600 transition-colors">{news.title}</CardTitle>
-          </div>
-        </div>
-        <CardDescription className="text-xs line-clamp-2">{news.summary}</CardDescription>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="space-y-2">
-          {news.artistMentions.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {news.artistMentions.slice(0, 2).map((artist) => (
-                <Badge key={artist} variant="secondary" className="text-xs">
-                  <Star className="w-3 h-3 mr-1" />
-                  {artist}
-                </Badge>
-              ))}
-              {news.artistMentions.length > 2 && (
-                <Badge variant="secondary" className="text-xs">
-                  +{news.artistMentions.length - 2}
-                </Badge>
-              )}
-            </div>
-          )}
-
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <Eye className="w-3 h-3" />
-                {formatNumber(news.engagement.views)}
-              </span>
-              <span className="flex items-center gap-1">
-                <ThumbsUp className="w-3 h-3" />
-                {formatNumber(news.engagement.likes)}
-              </span>
-            </div>
-            <Badge className="bg-purple-100 text-purple-800 text-xs">Viral: {news.viralityIndex}%</Badge>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
+  const getDataSourceBadge = () => {
+    switch (dataSource) {
+      case "spotify":
+        return (
+          <Badge variant="default" className="bg-green-500">
+            Live Spotify Data
+          </Badge>
+        )
+      case "manual":
+        return <Badge variant="secondary">Admin Curated</Badge>
+      case "fallback":
+        return <Badge variant="outline">Curated Selection</Badge>
+      default:
+        return <Badge variant="outline">Music Data</Badge>
+    }
+  }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-50 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-orange-600" />
-          <p className="text-gray-600">Loading the latest Afrobeats...</p>
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-orange-500" />
+          <p className="text-lg font-medium">Loading fresh Afrobeats...</p>
+          <p className="text-sm text-muted-foreground mt-2">Discovering the latest releases</p>
         </div>
       </div>
     )
@@ -495,210 +196,360 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">🎵 Afropulse</h1>
-              <p className="text-gray-600">
-                Discover the pulse of African music • {newReleases.length + buzzingSongs.length} tracks •{" "}
-                {discoveredArtists} artists • Last 7 days
-              </p>
+      {/* Hero Section */}
+      <section className="relative overflow-hidden bg-gradient-to-r from-orange-500 via-red-500 to-pink-500">
+        <div className="absolute inset-0 bg-black/20"></div>
+        <div className="relative container mx-auto px-4 py-20 text-center text-white">
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-5xl md:text-7xl font-bold mb-6 bg-gradient-to-r from-white to-orange-100 bg-clip-text text-transparent">
+              Afropulse
+            </h1>
+            <p className="text-xl md:text-2xl mb-8 text-orange-100">
+              Your pulse on the freshest Afrobeats, Amapiano, and African music
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 mb-8">
+              <Badge variant="secondary" className="bg-white/20 text-white border-white/30 text-lg px-4 py-2">
+                <Music className="w-4 h-4 mr-2" />
+                {newReleases.length} New Releases
+              </Badge>
+              <Badge variant="secondary" className="bg-white/20 text-white border-white/30 text-lg px-4 py-2">
+                <TrendingUp className="w-4 h-4 mr-2" />
+                {buzzingSongs.length} Buzzing Songs
+              </Badge>
+              <Badge variant="secondary" className="bg-white/20 text-white border-white/30 text-lg px-4 py-2">
+                <Globe className="w-4 h-4 mr-2" />
+                African Focus
+              </Badge>
             </div>
-            <div className="flex items-center gap-3">
-              {getDataSourceBadge()}
-              <Button onClick={handleRefresh} disabled={refreshing} variant="outline" size="sm">
-                {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              </Button>
+
+            {/* Newsletter Signup */}
+            <div className="max-w-md mx-auto">
+              <form onSubmit={handleSubscribe} className="flex gap-2">
+                <Input
+                  type="email"
+                  placeholder="Enter your email for weekly digest"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-white/10 border-white/30 text-white placeholder:text-white/70 focus:bg-white/20"
+                  disabled={isSubscribing}
+                />
+                <Button
+                  type="submit"
+                  disabled={isSubscribing || !email.trim()}
+                  className="bg-white text-orange-500 hover:bg-orange-50 font-semibold px-6"
+                >
+                  {isSubscribing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </Button>
+              </form>
+              {subscriptionStatus === "success" && (
+                <div className="flex items-center justify-center gap-2 mt-3 text-green-100">
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm">Successfully subscribed!</span>
+                </div>
+              )}
+              {subscriptionStatus === "error" && (
+                <div className="flex items-center justify-center gap-2 mt-3 text-red-100">
+                  <XCircle className="w-4 h-4" />
+                  <span className="text-sm">Subscription failed. Try again.</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
-      </header>
+      </section>
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Trending News Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <Fire className="w-6 h-6 text-red-500" />
-              Trending Now
-            </h2>
-            <Button variant="outline" size="sm" onClick={() => window.open("/trending", "_blank")}>
-              <ExternalLink className="w-4 h-4 mr-1" />
-              View All
-            </Button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {trendingNews.slice(0, 3).map((news) => (
-              <TrendingNewsCard key={news.id} news={news} />
-            ))}
-          </div>
-        </div>
-
-        {/* Search and Filter */}
-        <div className="mb-8 space-y-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search songs, artists, or albums..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+      {/* Data Source Info */}
+      <section className="py-4 bg-white/50 border-b">
+        <div className="container mx-auto px-4">
+          <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              <span>Updated: {lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "Recently"}</span>
             </div>
             <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-500" />
-              <select
-                value={selectedGenre}
-                onChange={(e) => setSelectedGenre(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <option value="all">All Genres</option>
-                <option value="afrobeats">Afrobeats</option>
-                <option value="amapiano">Amapiano</option>
-                <option value="alte">Alté</option>
-                <option value="highlife">Highlife</option>
-              </select>
+              <Calendar className="w-4 h-4" />
+              <span>Last 7 days</span>
             </div>
+            {getDataSourceBadge()}
           </div>
         </div>
+      </section>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">New Releases</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{filteredReleases.length}</div>
-              <p className="text-xs text-muted-foreground">
-                {filteredReleases.length !== newReleases.length ? `of ${newReleases.length} total` : "last 7 days"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Buzzing Now</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{filteredBuzzing.length}</div>
-              <p className="text-xs text-muted-foreground">
-                {filteredBuzzing.length !== buzzingSongs.length ? `of ${buzzingSongs.length} total` : "tracks"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Artists</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{discoveredArtists}</div>
-              <p className="text-xs text-muted-foreground">discovered</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Last Updated</CardTitle>
-              <RefreshCw className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm font-bold">{new Date(lastUpdated).toLocaleTimeString()}</div>
-              <p className="text-xs text-muted-foreground">{new Date(lastUpdated).toLocaleDateString()}</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Main Content */}
-        <Tabs defaultValue="releases" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="releases" className="flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              New Releases ({filteredReleases.length})
-            </TabsTrigger>
-            <TabsTrigger value="buzzing" className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Buzzing Now ({filteredBuzzing.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="releases" className="space-y-4">
-            {filteredReleases.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredReleases.map((song, index) => (
-                  <SongCard key={song.id} song={song} index={index} />
-                ))}
+      <div className="container mx-auto px-4 py-12">
+        <div className="max-w-7xl mx-auto">
+          {/* New Releases Section */}
+          <section className="mb-16">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold mb-2 flex items-center gap-3">
+                  <Calendar className="w-8 h-8 text-orange-500" />
+                  Fresh Releases
+                </h2>
+                <p className="text-muted-foreground">Latest drops from the last 7 days</p>
               </div>
-            ) : (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <Music className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No releases found</h3>
-                  <p className="text-gray-600">
-                    {searchQuery || selectedGenre !== "all"
-                      ? "Try adjusting your search or filter criteria"
-                      : "Check back later for the latest releases"}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-
-          <TabsContent value="buzzing" className="space-y-4">
-            {filteredBuzzing.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredBuzzing.map((song, index) => (
-                  <SongCard key={song.id} song={song} index={index} showBuzzScore />
-                ))}
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No buzzing songs found</h3>
-                  <p className="text-gray-600">
-                    {searchQuery || selectedGenre !== "all"
-                      ? "Try adjusting your search or filter criteria"
-                      : "Check back later for trending tracks"}
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        {/* Newsletter Signup */}
-        <Card className="mt-12">
-          <CardHeader className="text-center">
-            <CardTitle className="flex items-center justify-center gap-2">
-              <Mail className="w-5 h-5" />
-              Weekly Digest
-            </CardTitle>
-            <CardDescription>
-              Get the top 20 new releases and buzzing songs delivered to your inbox every Friday
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubscribe} className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto">
-              <Input
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="flex-1"
-              />
-              <Button type="submit" disabled={subscribing}>
-                {subscribing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}
-                Subscribe
+              <Button variant="outline" asChild>
+                <a href="/trending">
+                  <TrendingUp className="w-4 h-4 mr-2" />
+                  View All Trending
+                </a>
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </div>
+
+            {newReleases.length === 0 ? (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <Music className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <h3 className="text-xl font-semibold mb-2">No New Releases</h3>
+                  <p className="text-muted-foreground">Check back soon for the latest drops!</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {newReleases.slice(0, 12).map((song) => (
+                  <Card
+                    key={song.id}
+                    className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-1 bg-white/80 backdrop-blur-sm"
+                  >
+                    <CardContent className="p-0">
+                      <div className="relative">
+                        <img
+                          src={
+                            song.imageUrl ||
+                            `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(song.artist + " " + song.album)}`
+                          }
+                          alt={`${song.album} cover`}
+                          className="w-full h-48 object-cover rounded-t-lg"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 rounded-t-lg flex items-center justify-center">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <Button size="sm" variant="secondary" className="bg-white/90 hover:bg-white">
+                              <Play className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        {isVeryRecent(song.releaseDate) && (
+                          <Badge className="absolute top-2 left-2 bg-red-500 text-white border-0">
+                            <Flame className="w-3 h-3 mr-1" />
+                            Fresh
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className="absolute top-2 right-2 bg-white/90 text-xs">
+                          {getDaysAgo(song.releaseDate)}
+                        </Badge>
+                      </div>
+                      <div className="p-4">
+                        <h3 className="font-semibold text-lg mb-1 line-clamp-1">{song.name}</h3>
+                        <p className="text-muted-foreground mb-2 line-clamp-1">{song.artist}</p>
+                        <p className="text-sm text-muted-foreground mb-3 line-clamp-1">{song.album}</p>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {song.genre}
+                            </Badge>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Headphones className="w-3 h-3" />
+                              {formatStreams(song.streams)}
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            {song.previewUrl && (
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild>
+                                <a href={song.previewUrl} target="_blank" rel="noopener noreferrer">
+                                  <Volume2 className="w-4 h-4" />
+                                </a>
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild>
+                              <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Buzzing Songs Section */}
+          <section className="mb-16">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold mb-2 flex items-center gap-3">
+                  <TrendingUp className="w-8 h-8 text-red-500" />
+                  Buzzing Right Now
+                </h2>
+                <p className="text-muted-foreground">Most popular tracks across platforms</p>
+              </div>
+              <Button variant="outline" asChild>
+                <a href="/news">
+                  <Globe className="w-4 h-4 mr-2" />
+                  Music News
+                </a>
+              </Button>
+            </div>
+
+            {buzzingSongs.length === 0 ? (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <TrendingUp className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <h3 className="text-xl font-semibold mb-2">No Buzzing Songs</h3>
+                  <p className="text-muted-foreground">Check back soon for trending tracks!</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {buzzingSongs.slice(0, 12).map((song, index) => (
+                  <Card
+                    key={song.id}
+                    className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-1 bg-white/80 backdrop-blur-sm"
+                  >
+                    <CardContent className="p-0">
+                      <div className="relative">
+                        <img
+                          src={
+                            song.imageUrl ||
+                            `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(song.artist + " " + song.album)}`
+                          }
+                          alt={`${song.album} cover`}
+                          className="w-full h-48 object-cover rounded-t-lg"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 rounded-t-lg flex items-center justify-center">
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <Button size="sm" variant="secondary" className="bg-white/90 hover:bg-white">
+                              <Play className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        <Badge className="absolute top-2 left-2 bg-gradient-to-r from-red-500 to-orange-500 text-white border-0">
+                          #{index + 1}
+                        </Badge>
+                        <div className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 rounded-full px-2 py-1">
+                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                          <span className="text-xs font-medium">{song.popularity}</span>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <h3 className="font-semibold text-lg mb-1 line-clamp-1">{song.name}</h3>
+                        <p className="text-muted-foreground mb-2 line-clamp-1">{song.artist}</p>
+                        <p className="text-sm text-muted-foreground mb-3 line-clamp-1">{song.album}</p>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {song.genre}
+                            </Badge>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Headphones className="w-3 h-3" />
+                              {formatStreams(song.streams)}
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            {song.previewUrl && (
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild>
+                                <a href={song.previewUrl} target="_blank" rel="noopener noreferrer">
+                                  <Volume2 className="w-4 h-4" />
+                                </a>
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild>
+                              <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="w-4 h-4" />
+                              </a>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Features Section */}
+          <section className="mb-16">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">Why Choose Afropulse?</h2>
+              <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+                Your one-stop destination for discovering the freshest African music
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <Card className="text-center p-6 bg-white/80 backdrop-blur-sm">
+                <div className="w-16 h-16 bg-gradient-to-r from-orange-500 to-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Calendar className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold mb-2">Fresh Daily Updates</h3>
+                <p className="text-muted-foreground">
+                  Get the latest releases within 7 days, updated daily with the freshest Afrobeats drops
+                </p>
+              </Card>
+
+              <Card className="text-center p-6 bg-white/80 backdrop-blur-sm">
+                <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <TrendingUp className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold mb-2">Trending Insights</h3>
+                <p className="text-muted-foreground">
+                  Discover what's buzzing across social media and streaming platforms
+                </p>
+              </Card>
+
+              <Card className="text-center p-6 bg-white/80 backdrop-blur-sm">
+                <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Mail className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-semibold mb-2">Weekly Digest</h3>
+                <p className="text-muted-foreground">
+                  Never miss a beat with our curated weekly email featuring the best new music
+                </p>
+              </Card>
+            </div>
+          </section>
+
+          {/* Newsletter CTA */}
+          <section className="text-center">
+            <Card className="bg-gradient-to-r from-orange-500 to-red-500 text-white border-0">
+              <CardContent className="p-12">
+                <h2 className="text-3xl font-bold mb-4">Stay in the Loop</h2>
+                <p className="text-xl mb-8 text-orange-100">
+                  Join thousands of music lovers getting their weekly Afrobeats fix
+                </p>
+                <div className="max-w-md mx-auto">
+                  <form onSubmit={handleSubscribe} className="flex gap-2">
+                    <Input
+                      type="email"
+                      placeholder="Your email address"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="bg-white/10 border-white/30 text-white placeholder:text-white/70 focus:bg-white/20"
+                      disabled={isSubscribing}
+                    />
+                    <Button
+                      type="submit"
+                      disabled={isSubscribing || !email.trim()}
+                      className="bg-white text-orange-500 hover:bg-orange-50 font-semibold px-6"
+                    >
+                      {isSubscribing ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4 mr-2" />
+                          Subscribe
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                  <p className="text-sm text-orange-100 mt-4">Free weekly digest • No spam • Unsubscribe anytime</p>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        </div>
       </div>
     </div>
   )
