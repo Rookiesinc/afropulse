@@ -1,277 +1,237 @@
 import { NextResponse } from "next/server"
 import nodemailer from "nodemailer"
+import { promises as fs } from "fs"
+import path from "path"
 
-interface DigestTrack {
-  id: string
-  name: string
-  artist: string
-  album: string
-  releaseDate: string
-  spotifyUrl: string
-  imageUrl: string
-  popularity: number
-  genre: string
-  streams: number
-  previewUrl: string | null
+const SUBSCRIBERS_FILE = path.join(process.cwd(), "data", "subscribers.json")
+
+interface Subscriber {
+  email: string
+  subscribedAt: string
+  verified: boolean
 }
 
-// Mock data for new releases (replace with actual fetched data)
+// In-memory cache for subscribers to reduce file reads
+let subscribersCache: Subscriber[] | null = null
+
+async function readSubscribers(): Promise<Subscriber[]> {
+  if (subscribersCache) {
+    return subscribersCache
+  }
+  try {
+    const data = await fs.readFile(SUBSCRIBERS_FILE, "utf8")
+    subscribersCache = JSON.parse(data)
+    return subscribersCache
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      // File does not exist, return empty array and create the directory/file
+      await fs.mkdir(path.dirname(SUBSCRIBERS_FILE), { recursive: true })
+      await fs.writeFile(SUBSCRIBERS_FILE, JSON.stringify([]), "utf8")
+      subscribersCache = []
+      return []
+    }
+    console.error("Error reading subscribers file:", error)
+    throw new Error("Failed to read subscribers data")
+  }
+}
+
+// Nodemailer transporter setup
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+})
+
+// Helper function to check if a date is within the last 7 days
+function isWithinSevenDays(releaseDate: string): boolean {
+  const date = new Date(releaseDate)
+  const now = new Date()
+  const sevenDaysAgo = new Date(now.setDate(now.getDate() - 7))
+  return date >= sevenDaysAgo && date <= new Date()
+}
+
+// Mock data for new releases (ensure they are genuinely from the last 7 days)
 const MOCK_NEW_RELEASES = [
   {
-    id: "mock1",
-    name: "New Vibe 2025",
-    artist: "Wizkid",
-    album: "Sounds of Lagos",
-    release_date: "2025-07-28",
-    image: "/placeholder.svg?height=300&width=300",
-    spotify_url: "https://open.spotify.com/track/mock1",
+    id: "release-1",
+    name: "Afrobeat Anthem",
+    artist: "Burna Boy",
+    album: "African Giant",
+    releaseDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+    spotifyUrl: "https://open.spotify.com/track/1",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273e5e2e2e2e2e2e2e2e2e2e2e2",
+    popularity: 90,
+    genre: "Afrobeats",
   },
   {
-    id: "mock2",
-    name: "Afrobeat Fusion",
-    artist: "Davido",
-    album: "Timeless",
-    release_date: "2025-07-29",
-    image: "/placeholder.svg?height=300&width=300",
-    spotify_url: "https://open.spotify.com/track/mock2",
+    id: "release-2",
+    name: "Amapiano Groove",
+    artist: "Tyla",
+    album: "Water",
+    releaseDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+    spotifyUrl: "https://open.spotify.com/track/2",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273f5f2f2f2f2f2f2f2f2f2f2f2",
+    popularity: 88,
+    genre: "Amapiano",
   },
   {
-    id: "mock3",
-    name: "Essence (Remix)",
+    id: "release-3",
+    name: "Alté Vibe",
     artist: "Tems",
     album: "For Broken Ears",
-    release_date: "2025-07-27",
-    image: "/placeholder.svg?height=300&width=300",
-    spotify_url: "https://open.spotify.com/track/mock3",
+    releaseDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days ago
+    spotifyUrl: "https://open.spotify.com/track/3",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273g6g2g2g2g2g2g2g2g2g2g2g2",
+    popularity: 85,
+    genre: "Alté",
   },
   {
-    id: "mock4",
-    name: "Last Last (Acoustic)",
-    artist: "Burna Boy",
-    album: "Love, Damini",
-    release_date: "2025-07-26",
-    image: "/placeholder.svg?height=300&width=300",
-    spotify_url: "https://open.spotify.com/track/mock4",
+    id: "release-4",
+    name: "Highlife Classic",
+    artist: "Flavour",
+    album: "Flavour of Africa",
+    releaseDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days ago
+    spotifyUrl: "https://open.spotify.com/track/4",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273h7h2h2h2h2h2h2h2h2h2h2h2",
+    popularity: 82,
+    genre: "Highlife",
   },
   {
-    id: "mock5",
-    name: "Rush (Afro Remix)",
-    artist: "Ayra Starr",
-    album: "19 & Dangerous",
-    release_date: "2025-07-25",
-    image: "/placeholder.svg?height=300&width=300",
-    spotify_url: "https://open.spotify.com/track/mock5",
+    id: "release-5",
+    name: "New Wave",
+    artist: "Rema",
+    album: "Rave & Roses",
+    releaseDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+    spotifyUrl: "https://open.spotify.com/track/5",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273i8i2i2i2i2i2i2i2i2i2i2i2",
+    popularity: 89,
+    genre: "Afrobeats",
   },
-]
+  {
+    id: "release-6",
+    name: "Street Pop",
+    artist: "Asake",
+    album: "Mr. Money With The Vibe",
+    releaseDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), // 4 days ago
+    spotifyUrl: "https://open.spotify.com/track/6",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273j9j2j2j2j2j2j2j2j2j2j2j2",
+    popularity: 87,
+    genre: "Afrobeats",
+  },
+  {
+    id: "release-7",
+    name: "Chill Amapiano",
+    artist: "Kabza De Small",
+    album: "I Am The King Of Amapiano",
+    releaseDate: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(), // 6 days ago
+    spotifyUrl: "https://open.spotify.com/track/7",
+    imageUrl: "https://i.scdn.co/image/ab67616d0000b273k0k2k2k2k2k2k2k2k2k2k2k2",
+    popularity: 84,
+    genre: "Amapiano",
+  },
+].filter((release) => isWithinSevenDays(release.releaseDate)) // Ensure only genuinely recent releases are included
 
-// In a real application, you would fetch verified subscribers from a database
-// For this demo, we'll use a hardcoded list of test emails.
-const TEST_SUBSCRIBERS = [
-  { email: "tobionisemo2020@gmail.com", verified: true },
-  { email: "tosinogen2012@gmail.com", verified: true },
-  // Add more test emails here if needed
-]
-
-// Placeholder for fetching new releases. In a real app, this would call your /api/releases endpoint.
-async function getNewReleases() {
-  // Simulate fetching data from your /api/releases endpoint
-  // In a real scenario, you'd use `fetch('/api/releases')`
-  return MOCK_NEW_RELEASES
-}
-
-// Function to generate the HTML content for the email digest
-function generateEmailHtml(releases: any[]) {
-  const releaseItemsHtml = releases
+async function generateDigestEmailHtml(newReleases: typeof MOCK_NEW_RELEASES): Promise<string> {
+  const releaseItemsHtml = newReleases
     .map(
       (release) => `
-    <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #fff;">
-      <img src="${release.image}" alt="${release.album}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px; float: left; margin-right: 15px;">
-      <h3 style="margin: 0 0 5px 0; color: #333;">${release.name}</h3>
-      <p style="margin: 0 0 5px 0; color: #555;">Artist: <strong>${release.artist}</strong></p>
-      <p style="margin: 0 0 10px 0; color: #555;">Album: <em>${release.album}</em></p>
-      <p style="margin: 0; color: #777; font-size: 0.9em;">Released: ${release.release_date}</p>
-      <a href="${release.spotify_url}" style="display: inline-block; margin-top: 10px; padding: 8px 15px; background-color: #1DB954; color: #ffffff; text-decoration: none; border-radius: 5px; font-size: 0.9em;">Listen on Spotify</a>
-      <div style="clear: both;"></div>
+    <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; display: flex; align-items: center; background-color: #ffffff;">
+      <img src="${release.imageUrl}" alt="${release.name} album cover" style="width: 80px; height: 80px; border-radius: 4px; margin-right: 15px; object-fit: cover;">
+      <div>
+        <h3 style="margin: 0 0 5px 0; font-size: 18px; color: #333;">${release.name}</h3>
+        <p style="margin: 0 0 5px 0; font-size: 14px; color: #555;"><strong>Artist:</strong> ${release.artist}</p>
+        <p style="margin: 0 0 10px 0; font-size: 14px; color: #555;"><strong>Album:</strong> ${release.album}</p>
+        <a href="${release.spotifyUrl}" style="display: inline-block; padding: 8px 15px; background-color: #e53e3e; color: #ffffff; text-decoration: none; border-radius: 5px; font-size: 14px;">Listen on Spotify</a>
+      </div>
     </div>
   `,
     )
     .join("")
 
   return `
-    <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; padding: 20px;">
-      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
-        <div style="background: linear-gradient(to right, #ff416c, #ff4b2b); padding: 30px; text-align: center; color: #ffffff;">
-          <h1 style="margin: 0; font-size: 28px;">Afrobeats Digest</h1>
-          <p style="margin: 5px 0 0; font-size: 16px;">Your weekly dose of the hottest new Afrobeats!</p>
-        </div>
-        <div style="padding: 30px;">
-          <h2 style="color: #333; text-align: center; margin-bottom: 25px;">🔥 New Releases This Week!</h2>
-          ${releaseItemsHtml}
-          <p style="text-align: center; margin-top: 30px; font-size: 1.1em; color: #555;">Stay tuned for more fresh sounds next week!</p>
-          <p style="text-align: center; margin-top: 20px;">
-            <a href="${process.env.VERCEL_URL}" style="display: inline-block; padding: 12px 25px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 5px; font-size: 16px;">Visit Our Website</a>
-          </p>
-        </div>
-        <div style="background-color: #f0f0f0; padding: 20px; text-align: center; font-size: 0.9em; color: #777;">
-          <p>&copy; ${new Date().getFullYear()} Afrobeats Digest. All rights reserved.</p>
-          <p>
-            <a href="${process.env.VERCEL_URL}/unsubscribe" style="color: #777; text-decoration: underline;">Unsubscribe</a> from this list.
-          </p>
-        </div>
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #f0f0f0; border-radius: 10px; background-color: #f9f9f9;">
+      <div style="text-align: center; padding-bottom: 20px; border-bottom: 1px solid #eee;">
+        <h1 style="color: #e53e3e; font-size: 28px; margin: 0;">Afropulse Weekly Digest</h1>
+        <p style="color: #777; font-size: 14px;">Your weekly dose of the hottest African music!</p>
+      </div>
+      
+      <div style="padding: 20px 0;">
+        <h2 style="color: #e53e3e; font-size: 22px; margin-top: 0; margin-bottom: 20px;">🔥 New Releases This Week</h2>
+        ${newReleases.length > 0 ? releaseItemsHtml : "<p>No new releases this week. Stay tuned!</p>"}
+      </div>
+
+      <div style="padding: 20px 0; border-top: 1px solid #eee; margin-top: 20px;">
+        <h2 style="color: #e53e3e; font-size: 22px; margin-top: 0; margin-bottom: 20px;">📈 Trending Tracks</h2>
+        <p style="color: #555;">Check out what's buzzing on our <a href="${process.env.VERCEL_URL}/trending" style="color: #e53e3e; text-decoration: none;">Trending Page</a>!</p>
+      </div>
+
+      <div style="text-align: center; padding-top: 20px; border-top: 1px solid #eee; margin-top: 20px; font-size: 12px; color: #999;">
+        <p>You received this email because you subscribed to Afropulse. If you no longer wish to receive these emails, you can <a href="${process.env.VERCEL_URL}/unsubscribe" style="color: #e53e3e; text-decoration: none;">unsubscribe here</a>.</p>
+        <p>&copy; ${new Date().getFullYear()} Afropulse. All rights reserved.</p>
       </div>
     </div>
   `
 }
 
-export async function POST() {
+export async function GET() {
   try {
-    console.log("📧 Starting weekly digest send...")
+    const subscribers = await readSubscribers()
+    const verifiedSubscribers = subscribers.filter((s) => s.verified)
 
-    // Get active subscribers
-    const activeSubscribers = TEST_SUBSCRIBERS.filter((s) => s.verified)
-
-    if (activeSubscribers.length === 0) {
-      return NextResponse.json({
-        message: "No active subscribers found",
-        sent: 0,
-      })
+    if (verifiedSubscribers.length === 0) {
+      return NextResponse.json({ message: "No verified subscribers to send digest to." }, { status: 200 })
     }
 
-    // Fetch latest releases
-    const tracks = await getNewReleases()
+    const emailHtml = await generateDigestEmailHtml(MOCK_NEW_RELEASES)
 
-    if (tracks.length === 0) {
-      return NextResponse.json({
-        error: "No tracks available for digest",
-        sent: 0,
-      })
-    }
-
-    // Create email transporter
-    const GMAIL_USER = process.env.GMAIL_USER
-    const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
-
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-      return NextResponse.json(
-        { message: "Email transporter not configured. Check GMAIL_USER and GMAIL_APP_PASSWORD environment variables." },
-        { status: 500 },
-      )
-    }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: GMAIL_USER,
-        pass: GMAIL_APP_PASSWORD,
-      },
-    })
-
-    // Send emails
     let sentCount = 0
-    const errors: string[] = []
+    const failedRecipients: string[] = []
 
-    for (const subscriber of activeSubscribers) {
+    for (const subscriber of verifiedSubscribers) {
+      const mailOptions = {
+        from: `"Afropulse" <${process.env.GMAIL_USER}>`, // Use GMAIL_USER directly
+        to: subscriber.email,
+        subject: "Your Weekly Afropulse Digest!",
+        html: emailHtml,
+      }
+
       try {
-        const htmlContent = generateEmailHtml(tracks.slice(0, 20))
-
-        await transporter.sendMail({
-          from: GMAIL_USER, // Sender address
-          to: subscriber.email, // List of recipients
-          subject: `🎵 Your Weekly Afrobeats Digest - ${tracks.length} Hot New Releases!`, // Subject line
-          html: htmlContent, // HTML body
-        })
-
-        sentCount++
-        console.log(`✅ Digest sent to: ${subscriber.email}`)
-
-        // Add delay between emails to avoid rate limiting
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        // Add a timeout for sending each email
+        await Promise.race([
+          new Promise<void>((resolve, reject) => {
+            transporter.sendMail(mailOptions, (err) => {
+              if (err) {
+                console.error(`Error sending email to ${subscriber.email}:`, err)
+                failedRecipients.push(subscriber.email)
+                reject(err)
+              } else {
+                sentCount++
+                resolve()
+              }
+            })
+          }),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error("Email sending timed out")), 10000)), // 10 second timeout per email
+        ])
+        await new Promise((resolve) => setTimeout(resolve, 1000)) // 1-second delay between emails to avoid rate limits
       } catch (error) {
-        console.error(`❌ Failed to send digest to ${subscriber.email}:`, error)
-        errors.push(`${subscriber.email}: ${error}`)
+        console.error(`Failed to send email to ${subscriber.email} after timeout/error:`, error)
+        if (!failedRecipients.includes(subscriber.email)) {
+          failedRecipients.push(subscriber.email)
+        }
       }
     }
 
-    console.log(`📊 Digest sending complete: ${sentCount}/${activeSubscribers.length} sent`)
-
     return NextResponse.json({
-      message: `Weekly digest sent successfully`,
-      sent: sentCount,
-      total: activeSubscribers.length,
-      tracks: tracks.length,
-      errors: errors.length > 0 ? errors : undefined,
+      message: "Weekly digest sending initiated.",
+      totalSubscribers: verifiedSubscribers.length,
+      sentCount,
+      failedRecipients,
+      lastRun: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("❌ Error sending weekly digest:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to send weekly digest",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
+    console.error("Error in send-digest API:", error)
+    return NextResponse.json({ error: "Failed to send weekly digest" }, { status: 500 })
   }
-}
-
-export async function GET() {
-  const GMAIL_USER = process.env.GMAIL_USER
-  const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
-
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-    console.error("Gmail credentials not set. Cannot send digest emails.")
-    return NextResponse.json({ message: "Gmail credentials not configured. Digest not sent." }, { status: 500 })
-  }
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: GMAIL_USER,
-      pass: GMAIL_APP_PASSWORD,
-    },
-  })
-
-  const newReleases = await getNewReleases() // Fetch new releases
-  if (newReleases.length === 0) {
-    console.log("No new releases found for the digest. Skipping email send.")
-    return NextResponse.json({ message: "No new releases found to send." }, { status: 200 })
-  }
-
-  const emailHtml = generateEmailHtml(newReleases)
-
-  let sentCount = 0
-  let failedCount = 0
-
-  for (const subscriber of TEST_SUBSCRIBERS) {
-    // Iterate through TEST_SUBSCRIBERS
-    if (!subscriber.verified) {
-      console.log(`Skipping unverified subscriber: ${subscriber.email}`)
-      continue
-    }
-
-    try {
-      await transporter.sendMail({
-        from: GMAIL_USER,
-        to: subscriber.email,
-        subject: "Your Weekly Afrobeats Digest is Here! 🔥",
-        html: emailHtml,
-      })
-      console.log(`Digest sent to: ${subscriber.email}`)
-      sentCount++
-    } catch (error) {
-      console.error(`Failed to send digest to ${subscriber.email}:`, error)
-      failedCount++
-    }
-
-    // Add a small delay to avoid hitting email provider rate limits
-    await new Promise((resolve) => setTimeout(resolve, 1000)) // 1 second delay per email
-  }
-
-  return NextResponse.json(
-    {
-      message: `Weekly digest sent. Sent: ${sentCount}, Failed: ${failedCount}`,
-      totalSubscribers: TEST_SUBSCRIBERS.length,
-      newReleasesCount: newReleases.length,
-    },
-    { status: 200 },
-  )
 }

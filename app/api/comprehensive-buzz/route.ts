@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-interface ComprehensiveSong {
+interface AggregatedSong {
   id: string
   name: string
   artist: string
@@ -11,262 +11,172 @@ interface ComprehensiveSong {
   popularity: number
   genre: string
   streams?: number
-  
-  // Social media metrics
-  socialBuzzScore: number
-  totalMentions: number
-  socialSentiment: number
-  platforms: string[]
-  hashtags: string[]
-  
-  // Web presence metrics
-  webBuzzScore: number
-  webMentions: number
-  webSentiment: number
-  webSources: string[]
-  
-  // Combined metrics
-  overallBuzzScore: number
-  trendingVelocity: number
-  crossPlatformReach: number
-}
-
-function createUniqueKey(artist: string, song: string): string {
-  return `${artist.toLowerCase().trim().replace(/[^a-z0-9]/g, '')}-${song.toLowerCase().trim().replace(/[^a-z0-9]/g, '')}`
-}
-
-function findBestMatch(targetArtist: string, targetSong: string, dataArray: any[]): any {
-  const targetKey = createUniqueKey(targetArtist, targetSong)
-  
-  // First try exact match
-  let match = dataArray.find(item => {
-    const itemKey = createUniqueKey(item.artist || item.name, item.song || item.name)
-    return itemKey === targetKey
-  })
-  
-  if (match) return match
-  
-  // Try partial artist match
-  const targetArtistClean = targetArtist.toLowerCase().trim()
-  match = dataArray.find(item => {
-    const itemArtist = (item.artist || '').toLowerCase().trim()
-    return itemArtist.includes(targetArtistClean) || targetArtistClean.includes(itemArtist)
-  })
-  
-  if (match) return match
-  
-  // Try partial song match
-  const targetSongClean = targetSong.toLowerCase().trim()
-  match = dataArray.find(item => {
-    const itemSong = (item.song || item.name || '').toLowerCase().trim()
-    return itemSong.includes(targetSongClean) || targetSongClean.includes(itemSong)
-  })
-  
-  return match
+  buzzScore?: number
+  webMentions?: number
+  socialSentiment?: number
+  platforms?: string[]
+  hashtags?: string[]
+  totalEngagement?: number
 }
 
 export async function GET() {
   try {
     const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"
-    
+
     // Fetch data from all sources
-    const [spotifyBuzzing, socialBuzz, webBuzz] = await Promise.all([
-      fetch(`${baseUrl}/api/buzzing`).then(res => res.ok ? res.json() : { songs: [] }),
-      fetch(`${baseUrl}/api/social-buzz`).then(res => res.ok ? res.json() : { socialBuzz: [] }),
-      fetch(`${baseUrl}/api/web-scraping`).then(res => res.ok ? res.json() : { webBuzz: [] })
+    const [spotifyReleasesRes, spotifyBuzzingRes, webBuzzRes, socialBuzzRes] = await Promise.all([
+      fetch(`${baseUrl}/api/releases`),
+      fetch(`${baseUrl}/api/buzzing`),
+      fetch(`${baseUrl}/api/web-buzz`),
+      fetch(`${baseUrl}/api/social-buzz`),
     ])
-    
-    const spotifySongs = spotifyBuzzing.songs || []
-    const socialData = socialBuzz.socialBuzz || []
-    const webData = webBuzz.webBuzz || []
-    
-    // Create comprehensive song objects with deduplication
-    const songMap = new Map<string, ComprehensiveSong>()
-    
-    // Start with Spotify data as the base
-    spotifySongs.forEach((song: any) => {
-      const key = createUniqueKey(song.artist, song.name)
-      
-      songMap.set(key, {
-        id: song.id,
-        name: song.name,
-        artist: song.artist,
-        album: song.album,
-        releaseDate: song.releaseDate,
-        spotifyUrl: song.spotifyUrl,
-        imageUrl: song.imageUrl,
-        popularity: song.popularity,
-        genre: song.genre,
-        streams: song.streams,
-        
-        // Initialize social metrics
-        socialBuzzScore: 0,
-        totalMentions: 0,
-        socialSentiment: 0,
-        platforms: [],
-        hashtags: [],
-        
-        // Initialize web metrics
-        webBuzzScore: 0,
-        webMentions: 0,
-        webSentiment: 0,
-        webSources: [],
-        
-        // Initialize combined metrics
-        overallBuzzScore: song.buzzScore || song.popularity || 0,
-        trendingVelocity: 0,
-        crossPlatformReach: 1 // Spotify only initially
-      })
-    })
-    
-    // Enhance with social media data
-    socialData.forEach((social: any) => {
-      const key = createUniqueKey(social.artist, social.song)
-      let song = songMap.get(key)
-      
-      if (!song) {
-        // Try to find existing song with fuzzy matching
-        const existingKey = Array.from(songMap.keys()).find(existingKey => {
-          const existing = songMap.get(existingKey)!
-          return findBestMatch(social.artist, social.song, [existing])
-        })
-        
-        if (existingKey) {
-          song = songMap.get(existingKey)!
-        } else {
-          // Create new song entry from social data
-          song = {
-            id: `social-${key}`,
-            name: social.song,
-            artist: social.artist,
-            album: 'Unknown Album',
-            releaseDate: new Date().toISOString(),
-            spotifyUrl: '#',
-            imageUrl: '/placeholder.svg?height=300&width=300',
-            popularity: 50,
-            genre: 'Afrobeats',
-            streams: 0,
-            
-            socialBuzzScore: 0,
-            totalMentions: 0,
-            socialSentiment: 0,
-            platforms: [],
-            hashtags: [],
-            
-            webBuzzScore: 0,
-            webMentions: 0,
-            webSentiment: 0,
-            webSources: [],
-            
-            overallBuzzScore: 0,
-            trendingVelocity: 0,
-            crossPlatformReach: 0
-          }
-          songMap.set(key, song)
-        }
-      }
-      
-      // Update social metrics
-      song.socialBuzzScore = social.buzzScore || 0
-      song.totalMentions = social.totalMentions || 0
-      song.socialSentiment = social.avgSentiment || 0
-      song.platforms = social.platforms || []
-      song.hashtags = social.hashtags || []
-      song.crossPlatformReach += social.platforms?.length || 0
-    })
-    
-    // Enhance with web data
-    webData.forEach((web: any) => {
-      const key = createUniqueKey(web.artist, web.song)
-      let song = songMap.get(key)
-      
-      if (!song) {
-        // Try fuzzy matching
-        const existingKey = Array.from(songMap.keys()).find(existingKey => {
-          const existing = songMap.get(existingKey)!
-          return findBestMatch(web.artist, web.song, [existing])
-        })
-        
-        if (existingKey) {
-          song = songMap.get(existingKey)!
-        }
-      }
-      
-      if (song) {
-        // Update web metrics
-        song.webBuzzScore = web.webBuzzScore || 0
-        song.webMentions = web.mentionCount || 0
-        song.webSentiment = web.avgSentiment || 0
-        song.webSources = web.sources || []
-        song.crossPlatformReach += web.sources?.length || 0
-      }
-    })
-    
-    // Calculate comprehensive buzz scores
-    const comprehensiveSongs = Array.from(songMap.values()).map(song => {
-      // Calculate overall buzz score (weighted combination)
-      const spotifyWeight = 0.3
-      const socialWeight = 0.4
-      const webWeight = 0.3
-      
-      const spotifyScore = song.popularity || 0
-      const socialScore = song.socialBuzzScore || 0
-      const webScore = song.webBuzzScore || 0
-      
-      song.overallBuzzScore = Math.round(
-        spotifyScore * spotifyWeight +
-        socialScore * socialWeight +
-        webScore * webWeight
-      )
-      
-      // Calculate trending velocity (how fast it's gaining traction)
-      song.trendingVelocity = Math.round(
-        (song.totalMentions / 100) * 0.5 +
-        (song.webMentions * 10) * 0.3 +
-        (song.socialSentiment * 100) * 0.2
-      )
-      
-      return song
+
+    const spotifyReleases = spotifyReleasesRes.ok ? await spotifyReleasesRes.json() : { songs: [] }
+    const spotifyBuzzing = spotifyBuzzingRes.ok ? await spotifyBuzzingRes.json() : { songs: [] }
+    const webBuzz = webBuzzRes.ok ? await webBuzzRes.json() : { buzzData: [] }
+    const socialBuzz = socialBuzzRes.ok ? await socialBuzzRes.json() : { socialBuzz: [] }
+
+    // Combine all song data from Spotify and social/web buzz
+    const allSongsMap = new Map<string, AggregatedSong>()
+
+    // Add Spotify releases
+    spotifyReleases.songs?.forEach((song: AggregatedSong) => {
+      allSongsMap.set(song.id, { ...song, buzzScore: song.popularity }) // Initialize buzzScore with popularity
     })
 
-    // Ensure only one song per artist (keep the highest overall buzz score)
-    const artistMap = new Map<string, ComprehensiveSong>()
-    comprehensiveSongs.forEach((song: ComprehensiveSong) => {
+    // Add Spotify buzzing songs (prioritize higher buzzScore if already exists)
+    spotifyBuzzing.songs?.forEach((song: AggregatedSong) => {
+      const existing = allSongsMap.get(song.id)
+      if (!existing || (song.buzzScore && song.buzzScore > (existing.buzzScore || 0))) {
+        allSongsMap.set(song.id, song)
+      }
+    })
+
+    // Enhance with Web Buzz data (mentions, sentiment from YouTube, Audiomack, Apple Music, etc.)
+    webBuzz.buzzData?.forEach((buzzItem: any) => {
+      // Find a matching song by artist or song name
+      let matchedSong: AggregatedSong | undefined = undefined
+      for (const song of allSongsMap.values()) {
+        if (
+          song.artist.toLowerCase().includes(buzzItem.artist.toLowerCase().split(" ")[0]) ||
+          song.name.toLowerCase().includes(buzzItem.song.toLowerCase())
+        ) {
+          matchedSong = song
+          break
+        }
+      }
+
+      if (matchedSong) {
+        matchedSong.webMentions = (matchedSong.webMentions || 0) + buzzItem.totalMentions
+        matchedSong.socialSentiment = (matchedSong.socialSentiment || 0) + buzzItem.avgSentiment
+        // Re-calculate buzzScore based on existing and new web buzz
+        matchedSong.buzzScore = Math.round(
+          (matchedSong.buzzScore || matchedSong.popularity) * 0.6 + buzzItem.buzzScore * 0.4,
+        )
+      } else {
+        // If no Spotify match, add as a new entry (simulated ID)
+        const newId = `web-buzz-${buzzItem.artist.replace(/\s/g, "")}-${buzzItem.song.replace(/\s/g, "")}`
+        allSongsMap.set(newId, {
+          id: newId,
+          name: buzzItem.song,
+          artist: buzzItem.artist,
+          album: "Web Buzz", // Default album
+          releaseDate: new Date().toISOString(), // Current date for web buzz
+          spotifyUrl: "#", // No direct Spotify URL
+          imageUrl: "/placeholder.svg?height=300&width=300",
+          popularity: Math.round(buzzItem.buzzScore), // Use buzzScore as popularity
+          genre: "Afrobeats", // Default genre
+          streams: buzzItem.totalMentions * 10, // Simulate streams from mentions
+          webMentions: buzzItem.totalMentions,
+          socialSentiment: buzzItem.avgSentiment,
+          buzzScore: buzzItem.buzzScore,
+        })
+      }
+    })
+
+    // Enhance with Social Buzz data (from Twitter, Instagram, TikTok, YouTube)
+    socialBuzz.socialBuzz?.forEach((socialItem: any) => {
+      // Find a matching song by artist or song name
+      let matchedSong: AggregatedSong | undefined = undefined
+      for (const song of allSongsMap.values()) {
+        if (
+          song.artist.toLowerCase().includes(socialItem.artist.toLowerCase().split(" ")[0]) ||
+          song.name.toLowerCase().includes(socialItem.song.toLowerCase())
+        ) {
+          matchedSong = song
+          break
+        }
+      }
+
+      if (matchedSong) {
+        matchedSong.webMentions = (matchedSong.webMentions || 0) + socialItem.totalMentions
+        matchedSong.socialSentiment = (matchedSong.socialSentiment || 0) + socialItem.avgSentiment
+        matchedSong.platforms = Array.from(new Set([...(matchedSong.platforms || []), ...socialItem.platforms]))
+        matchedSong.hashtags = Array.from(new Set([...(matchedSong.hashtags || []), ...socialItem.hashtags]))
+        matchedSong.totalEngagement = (matchedSong.totalEngagement || 0) + socialItem.totalEngagement
+
+        // Re-calculate buzzScore with social buzz
+        matchedSong.buzzScore = Math.round(
+          (matchedSong.buzzScore || matchedSong.popularity) * 0.5 + socialItem.buzzScore * 0.5,
+        )
+      } else {
+        // If no Spotify match, add as a new entry (simulated ID)
+        const newId = `social-buzz-${socialItem.artist.replace(/\s/g, "")}-${socialItem.song.replace(/\s/g, "")}`
+        allSongsMap.set(newId, {
+          id: newId,
+          name: socialItem.song,
+          artist: socialItem.artist,
+          album: "Social Buzz", // Default album
+          releaseDate: new Date().toISOString(), // Current date for social buzz
+          spotifyUrl: "#", // No direct Spotify URL
+          imageUrl: "/placeholder.svg?height=300&width=300",
+          popularity: Math.round(socialItem.buzzScore), // Use buzzScore as popularity
+          genre: "Afrobeats", // Default genre
+          streams: socialItem.totalEngagement / 10, // Simulate streams from engagement
+          webMentions: socialItem.totalMentions,
+          socialSentiment: socialItem.avgSentiment,
+          platforms: socialItem.platforms,
+          hashtags: socialItem.hashtags,
+          totalEngagement: socialItem.totalEngagement,
+          buzzScore: socialItem.buzzScore,
+        })
+      }
+    })
+
+    // Convert map to array and sort by buzzScore
+    const finalAggregatedSongs = Array.from(allSongsMap.values()).sort(
+      (a, b) => (b.buzzScore || 0) - (a.buzzScore || 0),
+    )
+
+    // Ensure only one song per artist (keep the highest buzz score)
+    const artistMap = new Map<string, AggregatedSong>()
+    finalAggregatedSongs.forEach((song: AggregatedSong) => {
       const artistKey = song.artist.toLowerCase().trim()
       const existing = artistMap.get(artistKey)
-      
-      if (!existing || (song.overallBuzzScore || 0) > (existing.overallBuzzScore || 0)) {
+
+      if (!existing || (song.buzzScore || 0) > (existing.buzzScore || 0)) {
         artistMap.set(artistKey, song)
       }
     })
 
-    // Sort by overall buzz score and limit to 20 songs
-    const finalSongs = Array.from(artistMap.values())
-      .sort((a, b) => (b.overallBuzzScore || 0) - (a.overallBuzzScore || 0))
-      .slice(0, 20)
-    
+    const deduplicatedSongs = Array.from(artistMap.values()).sort((a, b) => (b.buzzScore || 0) - (a.buzzScore || 0))
+
     return NextResponse.json({
-      songs: finalSongs,
+      songs: deduplicatedSongs,
       lastUpdated: new Date().toISOString(),
-      total: finalSongs.length,
-      dataSources: {
-        spotify: spotifySongs.length,
-        social: socialData.length,
-        web: webData.length,
-        combined: finalSongs.length
-      },
+      total: deduplicatedSongs.length,
+      aggregationComplete: true,
+      sources: ["spotify", "twitter", "instagram", "tiktok", "youtube", "audiomack", "apple-music", "web-scraping"],
       metrics: {
-        avgBuzzScore: Math.round(finalSongs.reduce((sum, song) => sum + song.overallBuzzScore, 0) / finalSongs.length),
-        avgCrossPlatformReach: Math.round(finalSongs.reduce((sum, song) => sum + song.crossPlatformReach, 0) / finalSongs.length),
-        totalPlatforms: [...new Set(finalSongs.flatMap(song => song.platforms))].length
-      }
+        spotifyReleasesCount: spotifyReleases.songs?.length || 0,
+        spotifyBuzzingCount: spotifyBuzzing.songs?.length || 0,
+        webBuzzCount: webBuzz.buzzData?.length || 0,
+        socialBuzzCount: socialBuzz.socialBuzz?.length || 0,
+        finalAggregatedCount: deduplicatedSongs.length,
+      },
     })
-    
   } catch (error) {
-    console.error("Error creating comprehensive buzz data:", error)
-    return NextResponse.json(
-      { error: "Failed to create comprehensive buzz data" },
-      { status: 500 }
-    )
+    console.error("Error aggregating data:", error)
+    return NextResponse.json({ error: "Failed to aggregate data from all sources" }, { status: 500 })
   }
 }
