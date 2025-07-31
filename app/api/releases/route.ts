@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server"
-import { promises as fs } from "fs"
-import path from "path"
 
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
@@ -19,12 +17,7 @@ interface SpotifyTrack {
   previewUrl?: string
 }
 
-interface SelectedSong extends SpotifyTrack {
-  selectedAt: string
-  selectedBy: string
-}
-
-// Nigerian and African artist names for enhanced recognition
+// Enhanced Nigerian and African artist database
 const NIGERIAN_ARTISTS = [
   "burna boy",
   "wizkid",
@@ -79,74 +72,72 @@ const NIGERIAN_ARTISTS = [
   "mi abaga",
   "falz",
   "ycee",
-  "dremo",
+  "young jonn",
+  "spyro",
+  "khaid",
+  "shallipopi",
 ]
 
-const AFRICAN_NAME_PATTERNS = [
-  // West African patterns
-  /^(ade|ola|ayo|bola|kemi|tolu|seun|femi|yemi|dele|dayo|wale|nike|sola)/i,
-  /^(kwa|nana|kofi|ama|akua|yaa|adjoa|efua|aba|adwoa)/i, // Ghanaian
-  /^(ous|abd|moha|fati|aisha|omar|yous|sara|nour)/i, // North African
+const AFRICAN_ARTISTS = [
+  // South African
+  "tyla",
+  "focalistic",
+  "dj maphorisa",
+  "kabza de small",
+  "sha sha",
+  "master kg",
+  "nomcebo zikode",
+  "busiswa",
+  "moonchild sanelly",
+  "sho madjozi",
+  "nasty c",
+  "black coffee",
+  "sun-el musician",
+  "ami faku",
+  "mlindo the vocalist",
+  "sjava",
 
-  // East African patterns
-  /^(kip|che|bet|rot|too|sang|jep|kir)/i, // Kenyan
-  /^(mwa|nda|nya|kam|mut|kir|wan|git)/i, // General East African
+  // Ghanaian
+  "black sherif",
+  "stonebwoy",
+  "shatta wale",
+  "sarkodie",
+  "king promise",
+  "kwesi arthur",
+  "gyakie",
+  "amaarae",
+  "r2bees",
+  "medikal",
+  "joey b",
+  "darkovibes",
 
-  // Southern African patterns
-  /^(tha|nko|mpo|tse|neo|kea|les|mat)/i, // South African
-  /^(tino|chipo|taka|rudo|fari|tendi)/i, // Zimbabwean
+  // Kenyan/East African
+  "sauti sol",
+  "nyashinski",
+  "khaligraph jones",
+  "otile brown",
+  "nadia mukami",
+  "diamond platnumz",
+  "rayvanny",
+  "harmonize",
+  "zuchu",
+  "nandy",
+  "mbosso",
 
-  // Central African patterns
-  /^(ngo|mba|ndi|oko|eke|chi|eme|ike)/i, // Central African
-
-  // Common African prefixes/suffixes
-  /^(mc|saint|sir|king|queen|prince|princess)/i,
-  /(wa|son|daughter|junior|senior|jr|sr)$/i,
+  // Other African
+  "aya nakamura",
+  "dadju",
+  "gims",
+  "fally ipupa",
+  "innoss'b",
+  "alpha blondy",
 ]
-
-// Check if name appears to be African
-function isLikelyAfricanName(name: string): boolean {
-  const cleanName = name.toLowerCase().trim()
-
-  // Check against known Nigerian artists
-  if (NIGERIAN_ARTISTS.some((artist) => cleanName.includes(artist) || artist.includes(cleanName))) {
-    return true
-  }
-
-  // Check against African name patterns
-  return AFRICAN_NAME_PATTERNS.some((pattern) => pattern.test(cleanName))
-}
-
-// Enhanced scoring for Nigerian/African artists
-function calculateAfricanScore(artist: string, popularity: number): number {
-  let score = popularity
-  const cleanArtist = artist.toLowerCase()
-
-  // Boost for Nigerian artists
-  if (NIGERIAN_ARTISTS.some((na) => cleanArtist.includes(na) || na.includes(cleanArtist))) {
-    score += 30 // Strong boost for Nigerian artists
-  }
-
-  // Boost for likely African names
-  if (isLikelyAfricanName(artist)) {
-    score += 20
-  }
-
-  // Boost for Afrobeats-related terms in artist name
-  const afrobeatTerms = ["afro", "naija", "lagos", "abuja", "ghana", "kenya", "south africa"]
-  if (afrobeatTerms.some((term) => cleanArtist.includes(term))) {
-    score += 15
-  }
-
-  return score
-}
 
 // Check if release date is within the last 7 days
 function isWithinSevenDays(dateString: string): boolean {
   const releaseDate = new Date(dateString)
   const now = new Date()
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-
   return releaseDate >= sevenDaysAgo && releaseDate <= now
 }
 
@@ -156,6 +147,24 @@ function generateRecentDate(): string {
   const daysAgo = Math.floor(Math.random() * 7) // 0-6 days ago
   const releaseDate = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000)
   return releaseDate.toISOString().split("T")[0]
+}
+
+// Enhanced scoring for Nigerian/African artists
+function calculateAfricanScore(artist: string, popularity: number): number {
+  let score = popularity
+  const cleanArtist = artist.toLowerCase()
+
+  // Boost for Nigerian artists (highest priority)
+  if (NIGERIAN_ARTISTS.some((na) => cleanArtist.includes(na) || na.includes(cleanArtist))) {
+    score += 40
+  }
+
+  // Boost for other African artists
+  if (AFRICAN_ARTISTS.some((aa) => cleanArtist.includes(aa) || aa.includes(cleanArtist))) {
+    score += 25
+  }
+
+  return score
 }
 
 async function getSpotifyAccessToken(): Promise<string | null> {
@@ -192,13 +201,13 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
     "year:2024-2025 genre:afrobeats",
     "year:2024-2025 genre:afropop",
     "year:2024-2025 genre:amapiano",
-    "year:2024-2025 genre:alte",
     "year:2024-2025 burna boy OR wizkid OR davido OR rema OR asake",
     "year:2024-2025 tems OR ayra starr OR ckay OR omah lay OR fireboy",
     "year:2024-2025 nigeria OR lagos OR afrobeats",
     "year:2024-2025 ghana OR kenya OR south africa",
     "year:2024-2025 african music",
     "year:2024-2025 naija OR afro",
+    "year:2024-2025 amapiano OR alte OR afrofusion",
   ]
 
   const allTracks: SpotifyTrack[] = []
@@ -267,7 +276,7 @@ async function searchSpotifyReleases(accessToken: string): Promise<SpotifyTrack[
     .slice(0, 20)
 }
 
-// Enhanced fallback data with realistic recent dates
+// Enhanced fallback data with at least 15 releases
 function getFallbackReleases(): SpotifyTrack[] {
   const fallbackTracks = [
     {
@@ -535,74 +544,32 @@ function getFallbackReleases(): SpotifyTrack[] {
   return fallbackTracks.slice(0, 20)
 }
 
-async function getSelectedSongs(): Promise<SelectedSong[]> {
-  try {
-    const dataDir = path.join(process.cwd(), "data")
-    const filePath = path.join(dataDir, "selected-releases.json")
-
-    const data = await fs.readFile(filePath, "utf8")
-    const parsed = JSON.parse(data)
-    return parsed.songs || []
-  } catch (error) {
-    // File doesn't exist or is invalid, return empty array
-    return []
-  }
-}
-
 export async function GET() {
   try {
-    // First check if there are manually selected songs
-    const selectedSongs = await getSelectedSongs()
-
-    if (selectedSongs.length > 0) {
-      // Use manually selected songs
-      const songs = selectedSongs.map((song) => ({
-        id: song.id,
-        name: song.name,
-        artist: song.artist,
-        album: song.album,
-        releaseDate: song.releaseDate,
-        spotifyUrl: song.spotifyUrl,
-        imageUrl: song.imageUrl,
-        popularity: song.popularity,
-        genre: song.genre,
-        streams: song.streams,
-        previewUrl: song.previewUrl,
-      }))
-
-      return NextResponse.json({
-        songs,
-        dataSource: "manual",
-        searchPeriod: "7 days",
-        manuallySelectedCount: selectedSongs.length,
-        lastUpdated: new Date().toISOString(),
-      })
-    }
-
     // Try to get fresh data from Spotify
     const accessToken = await getSpotifyAccessToken()
 
     if (accessToken) {
       const spotifyTracks = await searchSpotifyReleases(accessToken)
 
-      if (spotifyTracks.length > 0) {
+      if (spotifyTracks.length >= 15) {
         return NextResponse.json({
           songs: spotifyTracks,
           dataSource: "spotify",
           searchPeriod: "7 days",
-          lastUpdated: new Date().toISOString(),
+          timestamp: new Date().toISOString(),
         })
       }
     }
 
-    // Fallback to curated data
+    // Fallback to curated data (always has 20 tracks)
     const fallbackTracks = getFallbackReleases()
 
     return NextResponse.json({
       songs: fallbackTracks,
       dataSource: "fallback",
       searchPeriod: "7 days",
-      lastUpdated: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error("Error in releases API:", error)
@@ -614,7 +581,7 @@ export async function GET() {
       songs: fallbackTracks,
       dataSource: "error_fallback",
       searchPeriod: "7 days",
-      lastUpdated: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
       error: "API temporarily unavailable",
     })
   }

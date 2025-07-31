@@ -1,35 +1,51 @@
 import { NextResponse } from "next/server"
 import nodemailer from "nodemailer"
 
+const GMAIL_USER = process.env.GMAIL_USER
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD
+
+const TEST_EMAILS = ["tobionisemo2020@gmail.com", "tosinogen2012@gmail.com"]
+
 export async function POST(request: Request) {
   try {
+    console.log("🔍 Starting email delivery verification...")
     const { email } = await request.json()
 
     if (!email) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 })
     }
 
-    const gmailUser = process.env.GMAIL_USER
-    const gmailPassword = process.env.GMAIL_APP_PASSWORD
-
-    if (!gmailUser || !gmailPassword) {
-      return NextResponse.json({ error: "Email service not configured" }, { status: 500 })
+    // Check email configuration
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+      console.error("❌ Email configuration missing")
+      return NextResponse.json({ error: "Email configuration missing" }, { status: 500 })
     }
 
+    // Create transporter
+    console.log("📮 Setting up email transporter...")
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user: gmailUser,
-        pass: gmailPassword,
+        user: GMAIL_USER,
+        pass: GMAIL_APP_PASSWORD,
       },
     })
+
+    // Verify transporter
+    try {
+      await transporter.verify()
+      console.log("✅ Email transporter verified")
+    } catch (error) {
+      console.error("❌ Email transporter verification failed:", error)
+      return NextResponse.json({ error: "Email service unavailable" }, { status: 500 })
+    }
 
     // Generate verification token (in production, store this in database)
     const verificationToken = Math.random().toString(36).substring(2, 15)
     const verificationUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`
 
     const mailOptions = {
-      from: `"Afrobeats Tracker" <${gmailUser}>`,
+      from: `"Afrobeats Tracker" <${GMAIL_USER}>`,
       to: email,
       subject: "🎵 Verify Your Email - Afrobeats Tracker",
       html: `
@@ -86,7 +102,14 @@ export async function POST(request: Request) {
       `,
     }
 
-    await transporter.sendMail(mailOptions)
+    // Add timeout to email sending
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Email timeout")), 30000)
+    })
+
+    await Promise.race([transporter.sendMail(mailOptions), timeoutPromise])
+
+    console.log(`✅ Verification email sent to ${email}`)
 
     return NextResponse.json({
       success: true,
@@ -104,4 +127,12 @@ export async function POST(request: Request) {
       { status: 500 },
     )
   }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    message: "Email verification service is ready",
+    testEmails: TEST_EMAILS,
+    status: "ready",
+  })
 }

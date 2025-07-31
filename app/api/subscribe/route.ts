@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { promises as fs } from "fs"
+import { writeFile, readFile, mkdir } from "fs/promises"
+import { existsSync } from "fs"
 import path from "path"
 
 interface Subscriber {
   email: string
   subscribedAt: string
   isActive: boolean
-  verificationToken?: string
   verifiedAt?: string
 }
 
@@ -16,29 +16,39 @@ interface SubscriberData {
   lastUpdated: string
 }
 
+async function getSubscribersFilePath(): Promise<string> {
+  const dataDir = path.join(process.cwd(), "data")
+
+  // Ensure directory exists
+  if (!existsSync(dataDir)) {
+    await mkdir(dataDir, { recursive: true })
+  }
+
+  return path.join(dataDir, "subscribers.json")
+}
+
 async function getSubscribers(): Promise<SubscriberData> {
   try {
-    const dataDir = path.join(process.cwd(), "data")
-    const filePath = path.join(dataDir, "subscribers.json")
+    const filePath = await getSubscribersFilePath()
 
-    // Ensure directory exists
-    await fs.mkdir(dataDir, { recursive: true })
-
-    try {
-      const data = await fs.readFile(filePath, "utf8")
-      const parsed = JSON.parse(data)
-      return {
-        subscribers: parsed.subscribers || [],
-        total: parsed.total || 0,
-        lastUpdated: parsed.lastUpdated || new Date().toISOString(),
-      }
-    } catch (error) {
-      // File doesn't exist, return empty data
-      return {
+    if (!existsSync(filePath)) {
+      // Create initial file if it doesn't exist
+      const initialData: SubscriberData = {
         subscribers: [],
         total: 0,
         lastUpdated: new Date().toISOString(),
       }
+      await writeFile(filePath, JSON.stringify(initialData, null, 2))
+      return initialData
+    }
+
+    const data = await readFile(filePath, "utf8")
+    const parsed = JSON.parse(data)
+
+    return {
+      subscribers: parsed.subscribers || [],
+      total: parsed.total || 0,
+      lastUpdated: parsed.lastUpdated || new Date().toISOString(),
     }
   } catch (error) {
     console.error("Error reading subscribers:", error)
@@ -52,13 +62,8 @@ async function getSubscribers(): Promise<SubscriberData> {
 
 async function saveSubscribers(data: SubscriberData): Promise<void> {
   try {
-    const dataDir = path.join(process.cwd(), "data")
-    const filePath = path.join(dataDir, "subscribers.json")
-
-    // Ensure directory exists
-    await fs.mkdir(dataDir, { recursive: true })
-
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2))
+    const filePath = await getSubscribersFilePath()
+    await writeFile(filePath, JSON.stringify(data, null, 2))
   } catch (error) {
     console.error("Error saving subscribers:", error)
     throw error
@@ -85,7 +90,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json()
+    const body = await request.json()
+    const { email } = body
 
     if (!email || !isValidEmail(email)) {
       return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
@@ -123,20 +129,23 @@ export async function POST(request: NextRequest) {
 
     await saveSubscribers(data)
 
+    console.log(`✅ New subscriber added: ${normalizedEmail}`)
+
     return NextResponse.json({
       message: "Successfully subscribed to weekly digest!",
       email: normalizedEmail,
       total: data.total,
     })
   } catch (error) {
-    console.error("Error subscribing email:", error)
+    console.error("❌ Error subscribing email:", error)
     return NextResponse.json({ error: "Failed to subscribe. Please try again." }, { status: 500 })
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { email } = await request.json()
+    const body = await request.json()
+    const { email } = body
 
     if (!email || !isValidEmail(email)) {
       return NextResponse.json({ error: "Valid email address is required" }, { status: 400 })
@@ -158,13 +167,15 @@ export async function DELETE(request: NextRequest) {
 
     await saveSubscribers(data)
 
+    console.log(`✅ Subscriber unsubscribed: ${normalizedEmail}`)
+
     return NextResponse.json({
       message: "Successfully unsubscribed from weekly digest",
       email: normalizedEmail,
       total: data.total,
     })
   } catch (error) {
-    console.error("Error unsubscribing email:", error)
+    console.error("❌ Error unsubscribing email:", error)
     return NextResponse.json({ error: "Failed to unsubscribe. Please try again." }, { status: 500 })
   }
 }
